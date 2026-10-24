@@ -47,6 +47,8 @@ pub use nanocode_code_mode::remote::{
 };
 pub use nanocode_code_mode::tool;
 pub use nanocode_tool_runtime::{Failure, FunctionHandler, FunctionTool, Tools, TypedHandler};
+pub use nanocode_tools::output;
+pub use output::{Output, OutputError, OutputTurn, Outputs};
 
 pub use nanocode_durability::DurableAgentExt;
 
@@ -147,6 +149,7 @@ pub use nanocode_backend_codex::client as codex;
 #[doc(inline)]
 pub use nanocode_backend_codex::client::transport::layer as http;
 
+pub mod output;
 pub mod tools;
 
 #[doc(inline)]

@@ -28,10 +28,12 @@ nanocode-tools.workspace = true
 nanocode-backend-claude = { workspace = true }
 nanocode-durability = { workspace = true   }
 nanocode-subagents.workspace = true
+nanocode-schema.workspace = true
+nanocode-sync.workspace = true
+serde_json.workspace = true
 nanocode-code-mode = { path = "../runtime/code-mode", version = "0.6.7"   }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-serde_json.workspace = true
 nanocode-home.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net", "fs"] }
 nanocode-cua.workspace = true

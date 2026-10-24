@@ -1,5 +1,5 @@
 pub use nanocode_tool_contracts::*;
-pub use nanocode_tools_macros::tool;
+pub use nanocode_tools_macros::{output, tool};
 mod schema;
 pub use schema::schema_for;
 #[doc(hidden)]

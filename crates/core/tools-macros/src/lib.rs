@@ -258,6 +258,79 @@ fn result_output(output: &ReturnType) -> syn::Result<&Type> {
         .ok_or_else(|| Error::new_spanned(ty, "expected Result<T, E>"))
 }
 
+/// Derives the JSON Schema and decoding a structured output type needs, so
+/// `Outputs::prompt` can request it from an agent turn. Doc comments become
+/// schema descriptions; `#[serde(...)]` and `#[schemars(...)]` attributes
+/// shape the schema as they do elsewhere. Structs refuse unknown fields.
+#[proc_macro_attribute]
+pub fn output(attributes: TokenStream, item: TokenStream) -> TokenStream {
+    expand_output(attributes.into(), item.into())
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+fn expand_output(
+    attributes: proc_macro2::TokenStream,
+    item: proc_macro2::TokenStream,
+) -> syn::Result<proc_macro2::TokenStream> {
+    if !attributes.is_empty() {
+        return Err(Error::new_spanned(
+            attributes,
+            "#[output] takes no arguments; use #[serde(...)] or #[schemars(...)]",
+        ));
+    }
+    let item = syn::parse2::<syn::Item>(item)?;
+    let (attrs, is_struct) = match &item {
+        syn::Item::Struct(item) => (&item.attrs, true),
+        syn::Item::Enum(item) => (&item.attrs, false),
+        item => {
+            return Err(Error::new_spanned(
+                item,
+                "#[output] applies to structs and enums",
+            ));
+        }
+    };
+    let (nanocode, nanocode_path) = nanocode_path();
+    let serde_path = LitStr::new(
+        &format!("{nanocode_path}::__private::serde"),
+        Span::call_site(),
+    );
+    let schemars_path = LitStr::new(
+        &format!("{nanocode_path}::__private::schemars"),
+        Span::call_site(),
+    );
+    let deny_unknown_fields =
+        (is_struct && !denies_unknown_fields(attrs)).then(|| quote!(#[serde(deny_unknown_fields)]));
+    Ok(quote! {
+        #[derive(
+            #nanocode::__private::serde::Deserialize,
+            #nanocode::__private::schemars::JsonSchema
+        )]
+        #[serde(crate = #serde_path)]
+        #deny_unknown_fields
+        #[schemars(crate = #schemars_path)]
+        #item
+    })
+}
+
+fn denies_unknown_fields(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        let mut found = false;
+        if attr.path().is_ident("serde") {
+            let _ = attr.parse_nested_meta(|meta| {
+                found |= meta.path.is_ident("deny_unknown_fields");
+                if meta.input.peek(Token![=]) {
+                    meta.value()?.parse::<syn::Expr>()?;
+                } else if meta.input.peek(syn::token::Paren) {
+                    meta.input.parse::<proc_macro2::Group>()?;
+                }
+                Ok(())
+            });
+        }
+        found
+    })
+}
+
 fn nanocode_path() -> (proc_macro2::TokenStream, String) {
     for package in [
         "nanocode-tools",
