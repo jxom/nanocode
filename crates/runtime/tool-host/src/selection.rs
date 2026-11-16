@@ -175,6 +175,12 @@ pub trait AttachTarget {
     fn connect_tools(self, tools: Tools) -> Self::Connector;
 }
 
+static CODE_MODE_HOSTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn code_mode_hosts() -> bool {
+    CODE_MODE_HOSTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[derive(Clone)]
 pub struct Tools {
     exposure: ToolExposure,
@@ -447,13 +453,17 @@ impl Tools {
     }
 
     #[must_use]
-    pub const fn has_code_mode_host(&self) -> bool {
-        self.embedded_host.is_some()
+    pub fn has_code_mode_host(&self) -> bool {
+        self.embedded().is_some()
+    }
+
+    pub(crate) fn embedded(&self) -> Option<&Arc<dyn crate::embedded::CodeModeHost>> {
+        self.embedded_host.as_ref().filter(|_| code_mode_hosts())
     }
 
     #[must_use]
     pub fn hand_working_directory(&self, session_id: &str) -> Option<String> {
-        self.embedded_host.as_ref()?.working_directory(session_id)
+        self.embedded()?.working_directory(session_id)
     }
 
     #[must_use]
@@ -461,7 +471,7 @@ impl Tools {
         &self,
         session_id: &str,
     ) -> Option<nanocode_code_mode::remote::HandEnvironment> {
-        self.embedded_host.as_ref()?.environment(session_id)
+        self.embedded()?.environment(session_id)
     }
 
     #[must_use]
@@ -517,6 +527,7 @@ impl Tools {
 
     #[must_use]
     pub fn code_mode_host(mut self, host: impl crate::embedded::CodeModeHost) -> Self {
+        CODE_MODE_HOSTS.store(true, std::sync::atomic::Ordering::Relaxed);
         self.embedded_host = Some(Arc::new(host));
         self
     }
@@ -646,7 +657,7 @@ impl Tools {
     #[must_use]
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     pub fn for_backend(mut self, session_id: &str, backend: &str) -> Self {
-        if let Some(host) = &self.embedded_host {
+        if let Some(host) = self.embedded() {
             host.bind_session(session_id, backend);
         }
         #[cfg(not(target_family = "wasm"))]
@@ -724,7 +735,7 @@ impl Tools {
     #[must_use]
     pub fn for_session(mut self, session: &crate::SessionEnvironment) -> Self {
         self.embedded_session_id = Some(Arc::from(session.session_id()));
-        if let Some(host) = &self.embedded_host {
+        if let Some(host) = self.embedded() {
             host.link_session(session.session_id(), session.root_session_id());
         }
         #[cfg(not(target_family = "wasm"))]
@@ -796,7 +807,7 @@ impl Tools {
     }
 
     fn embedded_catalog_revision(&self) -> Option<Option<u64>> {
-        let host = self.embedded_host.as_ref()?;
+        let host = self.embedded()?;
         Some(self.embedded_session_id.as_deref().and_then(|session_id| {
             let definitions = host.tool_definitions(session_id).ok()?;
             let encoded = serde_json::to_vec(&definitions).ok()?;

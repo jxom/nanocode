@@ -394,9 +394,9 @@ impl FromIterator<(String, Value)> for Map<String, Value> {
     where
         T: IntoIterator<Item = (String, Value)>,
     {
-        Map {
-            map: FromIterator::from_iter(iter),
-        }
+        let mut map = Map::new();
+        map.extend(iter);
+        map
     }
 }
 
@@ -405,7 +405,9 @@ impl Extend<(String, Value)> for Map<String, Value> {
     where
         T: IntoIterator<Item = (String, Value)>,
     {
-        self.map.extend(iter);
+        for (key, value) in iter {
+            self.map.insert(key, value);
+        }
     }
 }
 

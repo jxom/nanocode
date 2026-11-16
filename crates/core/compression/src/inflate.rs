@@ -377,7 +377,7 @@ impl Inflate {
 
     fn length_codes(&self) -> &[Code] {
         match self.length_source {
-            LengthSource::Fixed => &FIXED_LENGTHS,
+            LengthSource::Fixed => &*FIXED_LENGTHS,
             LengthSource::CodeLengths => &self.tables.code_lengths,
             LengthSource::Dynamic => &self.tables.lengths,
         }
@@ -395,7 +395,7 @@ impl Inflate {
 
     fn distance_codes(&self) -> &[Code] {
         match self.distance_source {
-            DistanceSource::Fixed => &FIXED_DISTANCES,
+            DistanceSource::Fixed => &*FIXED_DISTANCES,
             DistanceSource::Dynamic => &self.tables.distances,
         }
     }

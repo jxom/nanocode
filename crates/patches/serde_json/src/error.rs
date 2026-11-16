@@ -104,6 +104,14 @@ impl From<Error> for io::Error {
     }
 }
 
+impl Error {
+    pub(crate) fn unplaced(mut self) -> Self {
+        self.err.line = 0;
+        self.err.column = 0;
+        self
+    }
+}
+
 struct ErrorImpl {
     code: ErrorCode,
     line: usize,

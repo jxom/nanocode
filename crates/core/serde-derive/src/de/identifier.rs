@@ -381,17 +381,8 @@ fn deserialize_identifier(
             &u64_fallthrough_arm_tokens
         };
 
-        quote! {
-            fn visit_u64<__E>(self, __value: u64) -> _serde::#private::Result<Self::Value, __E>
-            where
-                __E: _serde::de::Error,
-            {
-                match __value {
-                    #(#u64_mapping,)*
-                    _ => #u64_fallthrough_arm,
-                }
-            }
-        }
+        let _ = (u64_mapping, u64_fallthrough_arm);
+        quote! {}
     };
 
     let visit_borrowed = if fallthrough_borrowed.is_some() || collect_other_fields {
@@ -430,6 +421,27 @@ fn deserialize_identifier(
         None
     };
 
+    let visit_bytes = if collect_other_fields {
+        Some(quote! {
+        fn visit_bytes<__E>(self, __value: &[u8]) -> _serde::#private::Result<Self::Value, __E>
+        where
+            __E: _serde::de::Error,
+        {
+            match __value {
+                #(#bytes_mapping)*
+                _ => {
+                    #bytes_to_str
+                    #value_as_bytes_content
+                    #fallthrough_arm
+                }
+            }
+        }
+        })
+    } else {
+        let _ = (&bytes_to_str, &value_as_bytes_content);
+        None
+    };
+
     quote_block! {
         fn expecting(&self, __formatter: &mut _serde::#private::Formatter) -> _serde::#private::fmt::Result {
             _serde::#private::Formatter::write_str(__formatter, #expecting)
@@ -450,19 +462,7 @@ fn deserialize_identifier(
             }
         }
 
-        fn visit_bytes<__E>(self, __value: &[u8]) -> _serde::#private::Result<Self::Value, __E>
-        where
-            __E: _serde::de::Error,
-        {
-            match __value {
-                #(#bytes_mapping)*
-                _ => {
-                    #bytes_to_str
-                    #value_as_bytes_content
-                    #fallthrough_arm
-                }
-            }
-        }
+        #visit_bytes
 
         #visit_borrowed
     }

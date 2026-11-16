@@ -5,8 +5,8 @@ use nanocode_agent_core::{
 };
 use nanocode_durability::BlobUrl;
 use nanocode_image::prepare_base64_images;
-use nanocode_tool_host::image::ImageHistory;
 use nanocode_sys::base64::STANDARD;
+use nanocode_tool_host::image::ImageHistory;
 use serde_json::json;
 
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;

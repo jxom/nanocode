@@ -236,14 +236,16 @@ pub(crate) fn install_default_tools_with_providers(
         }
         _ => tools,
     };
-    Ok(if !matches!(delivery, crate::claude_bash::Delivery::Prompted) {
-        tools.adapter_cleanup(move || {
-            let jobs = reaped.clone();
-            async move {
-                jobs.reap();
-            }
-        })
-    } else {
-        tools
-    })
+    Ok(
+        if !matches!(delivery, crate::claude_bash::Delivery::Prompted) {
+            tools.adapter_cleanup(move || {
+                let jobs = reaped.clone();
+                async move {
+                    jobs.reap();
+                }
+            })
+        } else {
+            tools
+        },
+    )
 }

@@ -1,4 +1,5 @@
 use core::num::NonZeroU8;
+use std::sync::LazyLock;
 
 pub(super) const CODE_BITS_MAX: usize = 15;
 pub(super) const OP_LITERAL: u8 = 0;
@@ -56,9 +57,12 @@ pub(super) const LITERAL_TABLE_BITS: usize = 12;
 pub(super) const LITERAL_ENTRIES: usize = 1 << LITERAL_TABLE_BITS;
 pub(super) const LITERALS_PER_ENTRY: usize = 2;
 const LITERAL_SYMBOLS: usize = 256;
-pub(super) static FIXED_LITERALS: [Option<Literals>; LITERAL_ENTRIES] = fixed_literals();
-pub(super) static FIXED_LENGTHS: [Code; 1 << FIXED_LENGTH_ROOT_BITS] = fixed_lengths();
-pub(super) static FIXED_DISTANCES: [Code; 1 << FIXED_DISTANCE_ROOT_BITS] = fixed_distances();
+pub(super) static FIXED_LITERALS: LazyLock<[Option<Literals>; LITERAL_ENTRIES]> =
+    LazyLock::new(fixed_literals);
+pub(super) static FIXED_LENGTHS: LazyLock<[Code; 1 << FIXED_LENGTH_ROOT_BITS]> =
+    LazyLock::new(fixed_lengths);
+pub(super) static FIXED_DISTANCES: LazyLock<[Code; 1 << FIXED_DISTANCE_ROOT_BITS]> =
+    LazyLock::new(fixed_distances);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Code {

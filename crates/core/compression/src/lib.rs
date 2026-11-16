@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+extern crate std;
 
 pub mod brotli;
 pub mod bzip2;

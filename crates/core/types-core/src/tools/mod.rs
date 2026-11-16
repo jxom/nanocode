@@ -348,32 +348,6 @@ impl From<ToolProcessTraceWire> for ToolProcessTrace {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(remote = "ToolOutputContent", tag = "type", rename_all = "snake_case")]
-enum ToolOutputContentFields {
-    InputText {
-        text: String,
-    },
-
-    InputImage {
-        image_url: String,
-
-        detail: ImageDetail,
-    },
-
-    InputAudio {
-        audio_url: String,
-    },
-
-    InputFile {
-        file_data: String,
-    },
-
-    EncryptedContent {
-        encrypted_content: String,
-    },
-}
-
 impl<'de> Deserialize<'de> for ToolOutputContent {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
@@ -399,6 +373,38 @@ impl<'de> Deserialize<'de> for ToolOutputContent {
                 }
             });
         }
-        ToolOutputContentFields::deserialize(value).map_err(serde::de::Error::custom)
+        Self::from_fields(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl ToolOutputContent {
+    fn from_fields(value: Value) -> Result<Self, serde_json::Error> {
+        let mut fields =
+            crate::fields::Fields::new(value, "internally tagged enum ToolOutputContent")?;
+        let tag = fields.tag()?;
+        match tag.as_str() {
+            "input_text" => Ok(Self::InputText {
+                text: fields.take("text")?,
+            }),
+            "input_audio" => Ok(Self::InputAudio {
+                audio_url: fields.take("audio_url")?,
+            }),
+            "input_file" => Ok(Self::InputFile {
+                file_data: fields.take("file_data")?,
+            }),
+            "encrypted_content" => Ok(Self::EncryptedContent {
+                encrypted_content: fields.take("encrypted_content")?,
+            }),
+            _ => Err(serde::de::Error::unknown_variant(
+                &tag,
+                &[
+                    "input_text",
+                    "input_image",
+                    "input_audio",
+                    "input_file",
+                    "encrypted_content",
+                ],
+            )),
+        }
     }
 }

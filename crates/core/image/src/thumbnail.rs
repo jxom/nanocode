@@ -215,6 +215,10 @@ fn both<S: Sample, const N: usize>(
 }
 
 pub fn thumbnail(image: &Image, width: u32, height: u32) -> Image {
+    crate::codec::resize(image, width, height, crate::Filter::Thumbnail)
+}
+
+pub(crate) fn sample(image: &Image, width: u32, height: u32) -> Image {
     let (from_width, from_height) = (image.width(), image.height());
     let pixels = match image.pixels() {
         Pixels::Luma8(samples) => Pixels::Luma8(sample_boxes::<_, 1>(

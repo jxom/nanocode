@@ -237,8 +237,6 @@ impl PagedConversation {
 
 #[derive(Deserialize)]
 struct PagedSnapshot {
-    #[serde(flatten)]
-    conversation: PagedConversation,
     #[serde(default)]
     instructions: Option<EncodedPayload>,
     #[serde(default)]
@@ -248,8 +246,6 @@ struct PagedSnapshot {
 
 #[derive(Deserialize)]
 struct PagedCursor {
-    #[serde(flatten)]
-    conversation: PagedConversation,
     pending: Sequence,
     template: EncodedPayload,
     cursor: Value,
@@ -286,10 +282,11 @@ pub(super) fn hydrate_snapshot<'a>(
         if !paged(&stored) {
             return Ok(stored);
         }
+        let conversation: PagedConversation =
+            serde_json::from_value(stored.clone()).map_err(Error::InvalidPayload)?;
         let paged: PagedSnapshot = serde_json::from_value(stored).map_err(Error::InvalidPayload)?;
         let mut snapshot = paged.snapshot;
-        paged
-            .conversation
+        conversation
             .restore(reader, object(&mut snapshot, "/conversation")?, read)
             .await?;
         if let Some(instructions) = paged.instructions {
@@ -319,6 +316,8 @@ async fn advance_snapshot(
     if !paged(&stored) {
         return Ok((stored, None, None));
     }
+    let conversation: PagedConversation =
+        serde_json::from_value(stored.clone()).map_err(Error::InvalidPayload)?;
     let paged: PagedSnapshot = serde_json::from_value(stored).map_err(Error::InvalidPayload)?;
     let mut snapshot = paged.snapshot;
     let previous = previous.and_then(|(keys, mut earlier)| {
@@ -328,8 +327,7 @@ async fn advance_snapshot(
         }
     });
     let mut reuse = Reuse::default();
-    let hydrated = paged
-        .conversation
+    let hydrated = conversation
         .advance(
             reader,
             object(&mut snapshot, "/conversation")?,
@@ -359,14 +357,15 @@ pub(super) async fn hydrate_cursor(reader: PayloadReader<'_>, stored: Value) -> 
     if !paged(&stored) {
         return Ok(stored);
     }
+    let conversation: PagedConversation =
+        serde_json::from_value(stored.clone()).map_err(Error::InvalidPayload)?;
     let paged: PagedCursor = serde_json::from_value(stored).map_err(Error::InvalidPayload)?;
     let read = &mut HashSet::new();
     let pending = load_sequence(reader, paged.pending, read).await?;
     let prompt: serde_json::Map<String, Value> =
         reader.load_payload(paged.template).await?.decode()?;
     let mut cursor = paged.cursor;
-    paged
-        .conversation
+    conversation
         .restore(reader, object(&mut cursor, "/snapshot/conversation")?, read)
         .await?;
     insert(&mut cursor, "", "pending", pending)?;

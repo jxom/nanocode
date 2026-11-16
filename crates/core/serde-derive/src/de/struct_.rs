@@ -61,6 +61,7 @@ pub(super) fn deserialize(
     let field_visitor = deserialize_field_identifier(&deserialized_fields, cattrs, has_flatten);
 
     let visit_seq = match form {
+        _ if true => None,
         StructForm::Untagged(_) => None,
         _ if has_flatten => None,
         _ => {

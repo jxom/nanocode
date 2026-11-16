@@ -138,6 +138,10 @@ where
 }
 
 pub fn lanczos3(image: &Image, width: u32, height: u32) -> Image {
+    crate::codec::resize(image, width, height, crate::Filter::Lanczos3)
+}
+
+pub(crate) fn resample(image: &Image, width: u32, height: u32) -> Image {
     let source = (image.width(), image.height());
     if source == (width, height) {
         return image.clone();

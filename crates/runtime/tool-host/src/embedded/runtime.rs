@@ -60,7 +60,15 @@ pub struct EmbeddedToolRuntimeControl {
     session_id: Option<Arc<str>>,
 }
 
+fn hosted(host: Option<&Arc<dyn CodeModeHost>>) -> Option<&Arc<dyn CodeModeHost>> {
+    host.filter(|_| crate::selection::code_mode_hosts())
+}
+
 impl EmbeddedToolRuntime {
+    fn host(&self) -> Option<&Arc<dyn CodeModeHost>> {
+        hosted(self.host.as_ref())
+    }
+
     pub fn new(workspace: impl Into<PathBuf>, builtin_tools: Vec<Arc<dyn Tool>>) -> Self {
         let workspace = workspace.into();
         Self {
@@ -135,9 +143,7 @@ impl EmbeddedToolRuntime {
 
     #[must_use]
     pub fn carries_barrier(&self) -> bool {
-        self.host
-            .as_ref()
-            .is_some_and(|host| host.carries_barrier())
+        self.host().is_some_and(|host| host.carries_barrier())
     }
 
     #[must_use]
@@ -152,7 +158,7 @@ impl EmbeddedToolRuntime {
 
     #[must_use]
     pub fn context_shell(&self) -> Arc<str> {
-        match (&self.host, &self.session_id) {
+        match (self.host(), &self.session_id) {
             (Some(host), Some(session_id)) => host
                 .shell(session_id)
                 .map_or_else(|| Arc::from(self.default_shell_name()), Arc::from),
@@ -162,7 +168,7 @@ impl EmbeddedToolRuntime {
 
     #[must_use]
     pub fn context_directory(&self) -> Arc<str> {
-        match (&self.host, &self.session_id) {
+        match (self.host(), &self.session_id) {
             (Some(host), Some(session_id)) => host
                 .working_directory(session_id)
                 .map_or_else(|| Arc::clone(&self.working_directory), Arc::from),
@@ -173,7 +179,7 @@ impl EmbeddedToolRuntime {
     #[must_use]
     pub fn control(&self) -> EmbeddedToolRuntimeControl {
         EmbeddedToolRuntimeControl {
-            host: self.host.clone(),
+            host: self.host().cloned(),
             session_id: self.session_id.clone(),
         }
     }
@@ -187,23 +193,23 @@ impl EmbeddedToolRuntime {
         &self,
         session_id: &str,
     ) -> (Vec<ToolDefinition>, Vec<(String, String)>) {
-        let mode = match &self.host {
+        let mode = match self.host() {
             Some(host) if !self.direct => host.tool_mode(),
             _ => EmbeddedToolMode::Direct,
         };
-        let mut definitions = self.host.as_ref().map_or_else(Vec::new, |host| {
-            match host.tool_definitions(session_id) {
-                Ok(definitions) => definitions,
-                Err(error) => {
-                    nanocode_trace::warn!(
-                        target: "nanocode_code_mode",
-                        %error,
-                        "embedded Code Mode tool discovery failed"
-                    );
-                    Vec::new()
-                }
-            }
-        });
+        let mut definitions =
+            self.host()
+                .map_or_else(Vec::new, |host| match host.tool_definitions(session_id) {
+                    Ok(definitions) => definitions,
+                    Err(error) => {
+                        nanocode_trace::warn!(
+                            target: "nanocode_code_mode",
+                            %error,
+                            "embedded Code Mode tool discovery failed"
+                        );
+                        Vec::new()
+                    }
+                });
         definitions.retain(|definition| {
             !self.hidden_host_tool(definition.name())
                 && !self
@@ -294,7 +300,7 @@ impl EmbeddedToolRuntime {
                 )
             })
             .collect();
-        let resumable = self.host.as_ref().is_some_and(|host| host.supports_cells());
+        let resumable = self.host().is_some_and(|host| host.supports_cells());
         if resumable {
             let visible_definitions = code_mode_definitions
                 .into_iter()
@@ -439,8 +445,7 @@ impl EmbeddedToolRuntime {
     pub fn is_code_only(&self) -> bool {
         !self.direct
             && self
-                .host
-                .as_ref()
+                .host()
                 .is_some_and(|host| host.tool_mode() == EmbeddedToolMode::CodeOnly)
     }
 
@@ -452,7 +457,7 @@ impl EmbeddedToolRuntime {
         if self.callable_tool_names.load().contains(name) {
             return true;
         }
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Ok(definitions) = host.tool_definitions(session_id)
         {
             let names = definitions
@@ -472,7 +477,7 @@ impl EmbeddedToolRuntime {
         session_id: &str,
         wait: Duration,
     ) -> Result<crate::embedded::JobNotices, CodeModeHostError> {
-        match &self.host {
+        match self.host() {
             Some(host) => host.notices(session_id, wait).await,
             None => Ok(crate::embedded::JobNotices::default()),
         }
@@ -517,7 +522,7 @@ impl EmbeddedToolRuntime {
                 .await
                 .unwrap_or_else(|error| ToolOutput::error(error.to_string())));
         }
-        let Some(host) = &self.host else {
+        let Some(host) = self.host() else {
             return Ok(ToolOutput::error(format!(
                 "tool `{name}` is unavailable because no embedded tool adapter is configured; no handler was invoked"
             )));
@@ -542,7 +547,7 @@ impl EmbeddedToolRuntime {
         context: ToolContext<'_>,
     ) -> Result<CodeModeExecution, CodeModeHostError> {
         let context = self.stamp(context);
-        let Some(host) = &self.host else {
+        let Some(host) = self.host() else {
             return Ok(code_mode_unavailable("exec"));
         };
         let source = self.yielding(host, self.exec_yield, source, crate::code_mode_spec::source_yielding);
@@ -589,7 +594,7 @@ impl EmbeddedToolRuntime {
         } else {
             context.with_tool_settings(self.tool_settings)
         };
-        let Some(host) = &self.host else {
+        let Some(host) = self.host() else {
             return Ok(code_mode_unavailable("exec"));
         };
         let source = self.yielding(host, self.exec_yield, source, crate::code_mode_spec::source_yielding);
@@ -657,7 +662,7 @@ impl EmbeddedToolRuntime {
         context: ToolContext<'_>,
     ) -> Result<Option<CodeModeExecution>, CodeModeHostError> {
         let context = self.stamp(context);
-        match &self.host {
+        match self.host() {
             Some(host) if host.tool_mode() == EmbeddedToolMode::CodeOnly => {
                 host.recover_with_local_tools(context, self.cell_tools())
                     .await
@@ -683,7 +688,7 @@ impl EmbeddedToolRuntime {
         observer: &mut dyn CodeModeObserver,
     ) -> Result<CodeModeExecution, CodeModeHostError> {
         let context = self.stamp(context);
-        let Some(host) = &self.host else {
+        let Some(host) = self.host() else {
             return Ok(code_mode_unavailable("wait"));
         };
         let input = self.yielding(host, self.cell_yield, input, crate::code_mode_spec::wait_yielding);
@@ -725,9 +730,13 @@ impl CodeModeObserver for IgnoreUpdates {
 }
 
 impl EmbeddedToolRuntimeControl {
+    fn host(&self) -> Option<&Arc<dyn CodeModeHost>> {
+        hosted(self.host.as_ref())
+    }
+
     #[must_use]
     pub fn quiet(&self) -> bool {
-        match (&self.host, &self.session_id) {
+        match (self.host(), &self.session_id) {
             (Some(host), Some(session_id)) => host.quiet(session_id),
             (Some(_), None) => false,
             (None, _) => true,
@@ -735,7 +744,7 @@ impl EmbeddedToolRuntimeControl {
     }
 
     pub async fn preempt_turn(&self) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Err(error) = host.preempt_turn(session_id).await
         {
             nanocode_trace::warn!(target: "nanocode_tools", %error, "embedded Code Mode observation preemption failed");
@@ -743,19 +752,19 @@ impl EmbeddedToolRuntimeControl {
     }
 
     pub fn begin_turn(&self) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id) {
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id) {
             host.begin_turn(session_id);
         }
     }
 
     pub fn settle_preempt(&self) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id) {
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id) {
             host.settle_preempt(session_id);
         }
     }
 
     pub async fn cancel_turn(&self) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Err(error) = host.cancel_turn(session_id).await
         {
             nanocode_trace::warn!(target: "nanocode_code_mode", %error, "embedded Code Mode turn cancellation failed");
@@ -766,13 +775,13 @@ impl EmbeddedToolRuntimeControl {
         &self,
         observer: &mut (dyn FnMut(&str) -> Box<dyn CodeModeObserver> + Send),
     ) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id) {
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id) {
             host.detach_turn(session_id, observer);
         }
     }
 
     pub async fn cancel_turn_with_updates(&self, observer: &mut dyn CodeModeObserver) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Err(error) = host.cancel_turn_with_updates(session_id, observer).await
         {
             nanocode_trace::warn!(target: "nanocode_code_mode", %error, "embedded Code Mode turn cancellation failed");
@@ -780,7 +789,7 @@ impl EmbeddedToolRuntimeControl {
     }
 
     pub async fn cancel_with_updates(&self, observer: &mut dyn CodeModeObserver) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Err(error) = host.cancel_with_updates(session_id, observer).await
         {
             nanocode_trace::warn!(target: "nanocode_code_mode", %error, "embedded Code Mode cancellation failed");
@@ -788,7 +797,7 @@ impl EmbeddedToolRuntimeControl {
     }
 
     pub async fn cancel(&self) {
-        if let (Some(host), Some(session_id)) = (&self.host, &self.session_id)
+        if let (Some(host), Some(session_id)) = (self.host(), &self.session_id)
             && let Err(error) = host.cancel(session_id).await
         {
             nanocode_trace::warn!(

@@ -145,7 +145,7 @@ fn failed(format: Format) -> impl Fn(&dyn fmt::Display) -> DecodeError {
     }
 }
 
-enum Source<'a> {
+pub(crate) enum Source<'a> {
     Png(nanocode_png::Png<'a>),
     Jpeg(&'a [u8]),
     Gif(nanocode_gif::Gif<'a>),
@@ -157,12 +157,17 @@ enum Source<'a> {
 pub struct Decoder<'a> {
     bytes: &'a [u8],
     format: Format,
-    source: Source<'a>,
-    width: u32,
-    height: u32,
-    bytes_per_pixel: u64,
+    header: Header,
     limits: Limits,
     reserved: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Header {
+    pub width: u32,
+    pub height: u32,
+    pub bytes_per_pixel: u64,
+    pub icc_profile: Option<Vec<u8>>,
 }
 
 pub struct Decoded {
@@ -171,57 +176,77 @@ pub struct Decoded {
     pub exif: Option<Vec<u8>>,
 }
 
+pub(crate) fn parse(
+    bytes: &[u8],
+    format: Format,
+    limits: Limits,
+) -> Result<(Header, Source<'_>), DecodeError> {
+    let (width, height, bytes_per_pixel, source) = match format {
+        Format::Png => {
+            let memory = usize::try_from(limits.alloc_bytes_max).unwrap_or(usize::MAX);
+            let png =
+                nanocode_png::Png::new(bytes, memory).map_err(|error| failed(format)(&error))?;
+            let pixel = png.color().bytes_per_pixel() as u64;
+            (png.width(), png.height(), pixel, Source::Png(png))
+        }
+        Format::Jpeg => {
+            let header = nanocode_jpeg::header(bytes).map_err(|error| failed(format)(&error))?;
+            let pixel = header.color.channels() as u64;
+            (header.width, header.height, pixel, Source::Jpeg(bytes))
+        }
+        Format::Gif => {
+            let gif = nanocode_gif::Gif::new(bytes).map_err(|error| failed(format)(&error))?;
+            (gif.width(), gif.height(), 4, Source::Gif(gif))
+        }
+        Format::WebP => {
+            let decoder =
+                nanocode_webp::Decoder::new(bytes).map_err(|error| failed(format)(&error))?;
+            let header = decoder.header();
+            let pixel = if header.alpha { 4 } else { 3 };
+            (header.width, header.height, pixel, Source::WebP(decoder))
+        }
+        Format::Bmp => {
+            let bmp = Bmp::new(bytes).map_err(|error: BmpError| failed(format)(&error))?;
+            let pixel = if bmp.alpha() { 4 } else { 3 };
+            (bmp.width(), bmp.height(), pixel, Source::Bmp(bytes, bmp))
+        }
+        Format::Pnm => {
+            let pnm = Pnm::new(bytes).map_err(|error: PnmError| failed(format)(&error))?;
+            let pixel = (pnm.tuple().channels() * pnm.tuple().sample_bytes()) as u64;
+            (pnm.width(), pnm.height(), pixel, Source::Pnm(pnm))
+        }
+        other => return Err(DecodeError::Unsupported(other)),
+    };
+    let icc_profile = match &source {
+        Source::Png(png) => png.icc_profile().map(<[u8]>::to_vec),
+        _ => None,
+    };
+    let header = Header {
+        width,
+        height,
+        bytes_per_pixel,
+        icc_profile,
+    };
+    Ok((header, source))
+}
+
 impl<'a> Decoder<'a> {
     pub fn new(bytes: &'a [u8], format: Format, limits: Limits) -> Result<Self, DecodeError> {
-        let (width, height, bytes_per_pixel, source) = match format {
-            Format::Png => {
-                let memory = usize::try_from(limits.alloc_bytes_max).unwrap_or(usize::MAX);
-                let png = nanocode_png::Png::new(bytes, memory)
-                    .map_err(|error| failed(format)(&error))?;
-                let pixel = png.color().bytes_per_pixel() as u64;
-                (png.width(), png.height(), pixel, Source::Png(png))
-            }
-            Format::Jpeg => {
-                let header =
-                    nanocode_jpeg::header(bytes).map_err(|error| failed(format)(&error))?;
-                let pixel = header.color.channels() as u64;
-                (header.width, header.height, pixel, Source::Jpeg(bytes))
-            }
-            Format::Gif => {
-                let gif = nanocode_gif::Gif::new(bytes).map_err(|error| failed(format)(&error))?;
-                (gif.width(), gif.height(), 4, Source::Gif(gif))
-            }
-            Format::WebP => {
-                let decoder =
-                    nanocode_webp::Decoder::new(bytes).map_err(|error| failed(format)(&error))?;
-                let header = decoder.header();
-                let pixel = if header.alpha { 4 } else { 3 };
-                (header.width, header.height, pixel, Source::WebP(decoder))
-            }
-            Format::Bmp => {
-                let bmp = Bmp::new(bytes).map_err(|error: BmpError| failed(format)(&error))?;
-                let pixel = if bmp.alpha() { 4 } else { 3 };
-                (bmp.width(), bmp.height(), pixel, Source::Bmp(bytes, bmp))
-            }
-            Format::Pnm => {
-                let pnm = Pnm::new(bytes).map_err(|error: PnmError| failed(format)(&error))?;
-                let pixel = (pnm.tuple().channels() * pnm.tuple().sample_bytes()) as u64;
-                (pnm.width(), pnm.height(), pixel, Source::Pnm(pnm))
-            }
-            other => return Err(DecodeError::Unsupported(other)),
-        };
+        let header = crate::codec::installed()
+            .ok_or(DecodeError::Unsupported(format))?
+            .inspect(bytes, format, limits)?;
         if let Some(max) = limits.dimension_max
-            && (width > max || height > max)
+            && (header.width > max || header.height > max)
         {
-            return Err(DecodeError::DimensionsTooLarge { width, height });
+            return Err(DecodeError::DimensionsTooLarge {
+                width: header.width,
+                height: header.height,
+            });
         }
         Ok(Self {
             bytes,
             format,
-            source,
-            width,
-            height,
-            bytes_per_pixel,
+            header,
             limits,
             reserved: false,
         })
@@ -251,18 +276,16 @@ impl<'a> Decoder<'a> {
     }
 
     pub const fn dimensions(&self) -> (u32, u32) {
-        (self.width, self.height)
+        (self.header.width, self.header.height)
     }
 
     pub const fn total_bytes(&self) -> u64 {
-        (self.width as u64 * self.height as u64).saturating_mul(self.bytes_per_pixel)
+        (self.header.width as u64 * self.header.height as u64)
+            .saturating_mul(self.header.bytes_per_pixel)
     }
 
     pub fn icc_profile(&self) -> Option<Vec<u8>> {
-        match &self.source {
-            Source::Png(png) => png.icc_profile().map(<[u8]>::to_vec),
-            _ => None,
-        }
+        self.header.icc_profile.clone()
     }
 
     pub fn reserve(&mut self) -> Result<(), DecodeError> {
@@ -289,11 +312,12 @@ impl<'a> Decoder<'a> {
                 max: isize::MAX as u64,
             });
         }
-        let (width, height) = (self.width, self.height);
+        let (width, height) = self.dimensions();
         let image = |pixels: Pixels| {
             Image::new(width, height, pixels).expect("decoders fill width * height pixels")
         };
-        match self.source {
+        let (_, source) = parse(self.bytes, self.format, self.limits())?;
+        match source {
             Source::Png(png) => {
                 let icc_profile = png.icc_profile().map(<[u8]>::to_vec);
                 let color = png.color();

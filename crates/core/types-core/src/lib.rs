@@ -4,6 +4,7 @@ pub use identity::BackendId;
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf, str::FromStr};
 pub mod events;
+mod fields;
 pub mod preview;
 pub mod pricing;
 pub mod responses;
@@ -708,48 +709,6 @@ impl FromStr for Thinking {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(
-    remote = "UserInput",
-    tag = "type",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-enum UserInputFields {
-    Text {
-        text: String,
-    },
-
-    Image {
-        image_url: String,
-
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<ImageDetail>,
-    },
-
-    LocalImage {
-        path: PathBuf,
-
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<ImageDetail>,
-    },
-
-    Audio {
-        audio_url: String,
-    },
-
-    LocalAudio {
-        path: PathBuf,
-    },
-
-    File {
-        file_data: String,
-
-        #[serde(default)]
-        filename: Option<String>,
-    },
-}
-
 fn serialize_image_file_id<S: serde::Serializer>(
     file_id: &str,
     serializer: S,
@@ -783,6 +742,58 @@ impl<'de> Deserialize<'de> for UserInput {
                 }
             });
         }
-        UserInputFields::deserialize(value).map_err(serde::de::Error::custom)
+        Self::from_fields(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl UserInput {
+    fn from_fields(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let mut fields = fields::Fields::new(value, "internally tagged enum UserInput")?;
+        let tag = fields.tag()?;
+        match tag.as_str() {
+            "text" => {
+                fields.deny(&["text"])?;
+                Ok(Self::Text {
+                    text: fields.take("text")?,
+                })
+            }
+            "local_image" => {
+                fields.deny(&["path", "detail"])?;
+                Ok(Self::LocalImage {
+                    path: fields.take("path")?,
+                    detail: fields.optional("detail")?,
+                })
+            }
+            "audio" => {
+                fields.deny(&["audio_url"])?;
+                Ok(Self::Audio {
+                    audio_url: fields.take("audio_url")?,
+                })
+            }
+            "local_audio" => {
+                fields.deny(&["path"])?;
+                Ok(Self::LocalAudio {
+                    path: fields.take("path")?,
+                })
+            }
+            "file" => {
+                fields.deny(&["file_data", "filename"])?;
+                Ok(Self::File {
+                    file_data: fields.take("file_data")?,
+                    filename: fields.optional("filename")?,
+                })
+            }
+            _ => Err(serde::de::Error::unknown_variant(
+                &tag,
+                &[
+                    "text",
+                    "image",
+                    "local_image",
+                    "audio",
+                    "local_audio",
+                    "file",
+                ],
+            )),
+        }
     }
 }

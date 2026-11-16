@@ -165,7 +165,10 @@ pub(super) fn omit_documents(messages: &mut [HistoryMessage]) -> bool {
                     content: ToolResultContent::Blocks(blocks),
                     ..
                 } => {
-                    for block in blocks.iter_mut().filter(|block| block["type"] == "document") {
+                    for block in blocks
+                        .iter_mut()
+                        .filter(|block| block["type"] == "document")
+                    {
                         let mut text = json!({"type": "text", "text": DOCUMENT_OMITTED});
                         if let Some(control) = block.get("cache_control") {
                             text["cache_control"] = control.clone();
@@ -267,7 +270,6 @@ pub(super) async fn inline_images(
     }
     Ok(Some(messages))
 }
-
 
 #[cfg(test)]
 mod tests {
