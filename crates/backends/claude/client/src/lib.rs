@@ -283,6 +283,7 @@ pub enum Role {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Image {
@@ -411,12 +412,14 @@ pub enum ContentBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum ToolResultContent {
     Text(String),
     Blocks(Vec<Value>),
 }
 
+#[cfg(target_family = "wasm")]
 impl<'de> Deserialize<'de> for ToolResultContent {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match Value::deserialize(deserializer)? {
@@ -429,8 +432,10 @@ impl<'de> Deserialize<'de> for ToolResultContent {
     }
 }
 
+#[cfg(target_family = "wasm")]
 struct Fields(serde_json::Map<String, Value>);
 
+#[cfg(target_family = "wasm")]
 impl Fields {
     fn value(&mut self, name: &'static str) -> Result<Value, serde_json::Error> {
         self.0
@@ -447,6 +452,14 @@ impl Fields {
 
     fn string(&mut self, name: &'static str) -> Result<String, serde_json::Error> {
         String::deserialize(self.value(name)?)
+    }
+
+    fn index(&mut self, name: &'static str) -> Result<usize, serde_json::Error> {
+        usize::deserialize(self.value(name)?)
+    }
+
+    fn fields(&mut self, name: &'static str) -> Result<Self, serde_json::Error> {
+        serde_json::Map::deserialize(self.value(name)?).map(Self)
     }
 
     fn defaulted_string(&mut self, name: &'static str) -> Result<String, serde_json::Error> {
@@ -468,6 +481,7 @@ impl Fields {
     }
 }
 
+#[cfg(target_family = "wasm")]
 const CONTENT_BLOCK_TYPES: &[&str] = &[
     "image",
     "document",
@@ -491,6 +505,7 @@ const CONTENT_BLOCK_TYPES: &[&str] = &[
     "tool_removal",
 ];
 
+#[cfg(target_family = "wasm")]
 impl<'de> Deserialize<'de> for ContentBlock {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let fields = Fields(serde_json::Map::deserialize(deserializer)?);
@@ -498,6 +513,7 @@ impl<'de> Deserialize<'de> for ContentBlock {
     }
 }
 
+#[cfg(target_family = "wasm")]
 impl ContentBlock {
     fn from_fields(mut fields: Fields) -> Result<Self, serde_json::Error> {
         let kind = fields.string("type")?;
@@ -1713,15 +1729,32 @@ pub struct UsageIteration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    derive(Deserialize),
+    serde(tag = "type", rename_all = "snake_case")
+)]
 pub enum ContentDelta {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
-    ThinkingDelta { thinking: String },
-    SignatureDelta { signature: String },
-    CitationsDelta { citation: Value },
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    SignatureDelta {
+        signature: String,
+    },
+    CitationsDelta {
+        citation: Value,
+    },
+    #[cfg_attr(not(target_family = "wasm"), serde(other))]
     Other,
 }
 
+#[cfg(target_family = "wasm")]
 impl<'de> Deserialize<'de> for ContentDelta {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let fields = Fields(serde_json::Map::deserialize(deserializer)?);
@@ -1729,6 +1762,7 @@ impl<'de> Deserialize<'de> for ContentDelta {
     }
 }
 
+#[cfg(target_family = "wasm")]
 impl ContentDelta {
     fn from_fields(mut fields: Fields) -> Result<Self, serde_json::Error> {
         Ok(match fields.string("type")?.as_str() {
@@ -1760,6 +1794,11 @@ pub struct ApiError {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    derive(Deserialize),
+    serde(tag = "type", rename_all = "snake_case")
+)]
 pub enum StreamEvent {
     MessageStart {
         message: MessageResponse,
@@ -1784,9 +1823,11 @@ pub enum StreamEvent {
     Error {
         error: ApiError,
     },
+    #[cfg_attr(not(target_family = "wasm"), serde(other))]
     Other,
 }
 
+#[cfg(target_family = "wasm")]
 impl<'de> Deserialize<'de> for StreamEvent {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let fields = Fields(serde_json::Map::deserialize(deserializer)?);
@@ -1794,6 +1835,7 @@ impl<'de> Deserialize<'de> for StreamEvent {
     }
 }
 
+#[cfg(target_family = "wasm")]
 impl StreamEvent {
     fn from_fields(mut fields: Fields) -> Result<Self, serde_json::Error> {
         Ok(match fields.string("type")?.as_str() {
@@ -1801,15 +1843,15 @@ impl StreamEvent {
                 message: fields.take("message")?,
             },
             "content_block_start" => Self::ContentBlockStart {
-                index: fields.take("index")?,
-                content_block: fields.take("content_block")?,
+                index: fields.index("index")?,
+                content_block: ContentBlock::from_fields(fields.fields("content_block")?)?,
             },
             "content_block_delta" => Self::ContentBlockDelta {
-                index: fields.take("index")?,
-                delta: fields.take("delta")?,
+                index: fields.index("index")?,
+                delta: ContentDelta::from_fields(fields.fields("delta")?)?,
             },
             "content_block_stop" => Self::ContentBlockStop {
-                index: fields.take("index")?,
+                index: fields.index("index")?,
             },
             "message_delta" => Self::MessageDelta {
                 delta: fields.take("delta")?,
