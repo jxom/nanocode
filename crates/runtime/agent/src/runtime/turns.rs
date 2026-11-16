@@ -147,7 +147,7 @@ impl AgentRuntime {
     }
 
     pub async fn settle(&self, session_id: &str) -> Result<bool, NanocodeError> {
-        let Some(control) = self.subagents() else {
+        let Some(control) = self.delegates() else {
             return Ok(self.pending_turns(session_id).await?.is_empty());
         };
         let before = control.activity(session_id).await;

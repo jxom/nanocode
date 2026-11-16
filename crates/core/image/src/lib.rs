@@ -7,6 +7,7 @@ use std::{
 use nanocode_sync::Swap;
 use nanocode_sys::base64::STANDARD;
 mod bmp;
+mod codec;
 mod decode;
 mod metadata;
 mod pam;
@@ -16,6 +17,7 @@ mod resample;
 mod thumbnail;
 mod window;
 
+pub use codec::{Builtin, Codec, Encoding, encode, install};
 pub use decode::{
     DEFAULT_ALLOC_BYTES_MAX, DecodeError, Decoded, Decoder, Format, Limits, dimensions,
     guess_format,
@@ -893,53 +895,27 @@ fn encode_image(
         Format::WebP => Format::WebP,
         _ => Format::Png,
     };
-    let ImageMetadata { icc_profile, exif } = metadata;
-    let bytes = match target_format {
-        Format::Png => {
+    let converted = match (target_format, image.pixels()) {
+        (Format::Png, Pixels::Rgb8(_) | Pixels::Rgba8(_)) | (Format::Jpeg | Format::WebP, _) => {
+            None
+        }
+        (_, _) => {
             let (pixels, layout) = image.rgb_or_rgba8();
-            metadata::encode_png(
-                pixels.as_ref(),
-                image.width(),
-                image.height(),
-                layout,
-                icc_profile,
-                exif,
-            )
+            let pixels = match layout {
+                RgbLayout::Rgb => Pixels::Rgb8(pixels.into_owned()),
+                RgbLayout::Rgba => Pixels::Rgba8(pixels.into_owned()),
+            };
+            Image::new(image.width(), image.height(), pixels)
         }
-        Format::Jpeg => {
-            let rgb = image.to_rgb8();
-            let mut bytes = nanocode_jpeg::encode(
-                &rgb,
-                image.width(),
-                image.height(),
-                nanocode_jpeg::Color::Rgb,
-                JPEG_QUALITY,
-                icc_profile.as_deref(),
-            )
-            .map_err(|error| encode_error(target_format, &error))?;
-            if let Some(exif) = exif {
-                metadata::insert_jpeg_exif(&mut bytes, &exif)?;
-            }
-            bytes
-        }
-        Format::WebP => {
-            let (pixels, layout) = image.rgb_or_rgba8();
-            nanocode_webp::encode(
-                pixels.as_ref(),
-                image.width(),
-                image.height(),
-                layout == RgbLayout::Rgba,
-                icc_profile.as_deref(),
-                exif.as_deref(),
-            )
-            .map_err(|error| {
-                ImagePreparationError::Processing(format!(
-                    "unable to encode image as WebP: {error}"
-                ))
-            })?
-        }
-        _ => unreachable!("target format is normalized above"),
     };
+    let bytes = encode(Encoding {
+        exif: metadata.exif.as_deref(),
+        format: target_format,
+        icc_profile: metadata.icc_profile.as_deref(),
+        image: converted.as_ref().unwrap_or(image),
+        quality: JPEG_QUALITY,
+    })
+    .map_err(ImagePreparationError::Processing)?;
     Ok(EncodedImage {
         bytes: bytes.into(),
         mime: format_to_mime(target_format),
@@ -947,29 +923,14 @@ fn encode_image(
 }
 
 pub fn encode_png(image: &Image) -> Vec<u8> {
-    use nanocode_png::{Color, Pixels as Samples};
-    let (color, pixels) = match image.pixels() {
-        Pixels::Luma8(samples) => (Color::L8, Samples::Eight(samples)),
-        Pixels::LumaAlpha8(samples) => (Color::La8, Samples::Eight(samples)),
-        Pixels::Rgb8(samples) => (Color::Rgb8, Samples::Eight(samples)),
-        Pixels::Rgba8(samples) => (Color::Rgba8, Samples::Eight(samples)),
-        Pixels::Luma16(samples) => (Color::L16, Samples::Sixteen(samples)),
-        Pixels::LumaAlpha16(samples) => (Color::La16, Samples::Sixteen(samples)),
-        Pixels::Rgb16(samples) => (Color::Rgb16, Samples::Sixteen(samples)),
-        Pixels::Rgba16(samples) => (Color::Rgba16, Samples::Sixteen(samples)),
-    };
-    nanocode_png::encode(&nanocode_png::Encoding {
-        width: image.width(),
-        height: image.height(),
-        color,
-        pixels,
-        icc_profile: None,
+    encode(Encoding {
         exif: None,
+        format: Format::Png,
+        icc_profile: None,
+        image,
+        quality: JPEG_QUALITY,
     })
-}
-
-fn encode_error(format: Format, error: &dyn std::fmt::Display) -> ImagePreparationError {
-    ImagePreparationError::Processing(format!("unable to encode image as {format:?}: {error}"))
+    .unwrap_or_default()
 }
 
 const fn format_to_mime(format: Format) -> &'static str {
@@ -1047,13 +1008,11 @@ pub fn fit_data_url(url: &str, max_bytes: usize) -> Result<String, String> {
 }
 
 fn encode_jpeg(image: &Image) -> Result<Vec<u8>, String> {
-    nanocode_jpeg::encode(
-        &image.to_rgb8(),
-        image.width(),
-        image.height(),
-        nanocode_jpeg::Color::Rgb,
-        JPEG_QUALITY,
-        None,
-    )
-    .map_err(|error| format!("unable to encode image as JPEG: {error}"))
+    encode(Encoding {
+        exif: None,
+        format: Format::Jpeg,
+        icc_profile: None,
+        image,
+        quality: JPEG_QUALITY,
+    })
 }

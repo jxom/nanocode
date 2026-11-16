@@ -52,7 +52,7 @@ pub use nanocode_code_mode::remote::{
 };
 pub use nanocode_code_mode::tool;
 pub use nanocode_tool_runtime::{
-    Failure, FunctionHandler, FunctionTool, ToolRecovery, Tools, TypedHandler,
+    Failure, FunctionHandler, FunctionTool, ToolRecovery, Tools, ToolsBuilder, TypedHandler,
 };
 
 pub use nanocode_durability::DurableAgentExt;
@@ -175,6 +175,68 @@ pub use nanocode_subagents::{
 };
 pub type Defaults = nanocode_agent_host::Defaults<CodexHarness, ClaudeHarness>;
 pub type Nanocode = nanocode_agent::Runtime<Defaults>;
+pub use nanocode_agent::{AgentRuntime, CheckpointFormats, Runtime, RuntimeBuilder};
+pub use nanocode_agent_config::configuration::{RuntimeBackend, RuntimeDefaults};
+pub type ClaudeDefaults = nanocode_agent_host::Defaults<Absent<ClaudeHarness>, ClaudeHarness>;
+pub type CodexDefaults = nanocode_agent_host::Defaults<CodexHarness, Absent<CodexHarness>>;
+
+pub enum Absent<F> {
+    Never(std::convert::Infallible, std::marker::PhantomData<fn() -> F>),
+}
+
+impl<F> Clone for Absent<F> {
+    fn clone(&self) -> Self {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+}
+
+impl<F: 'static> nanocode_agent_config::configuration::RuntimeBackend for Absent<F> {
+    fn id(&self) -> BackendId {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+    fn default_model(&self) -> ModelSelection {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+    fn validate_model(&self, _model: &str) -> nanocode_agent_core::Result<()> {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+    fn checkpoint_format(&self) -> Option<std::sync::Arc<dyn durability::CheckpointFormat>> {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+    fn build(
+        &self,
+        _request: nanocode_agent_config::configuration::RuntimeRequest,
+    ) -> nanocode_agent_core::backend::BackendFuture<nanocode_agent_config::configuration::AgentResult>
+    {
+        match *self {
+            Self::Never(never, _) => match never {},
+        }
+    }
+}
+
+impl<F: nanocode_agent_config::configuration::DefaultRuntimeBackend>
+    nanocode_agent_config::configuration::DefaultRuntimeBackend for Absent<F>
+{
+    fn backend_id() -> BackendId {
+        F::backend_id()
+    }
+    fn native_default() -> Option<Self> {
+        None
+    }
+    fn builtin_format() -> std::sync::Arc<dyn durability::CheckpointFormat> {
+        F::builtin_format()
+    }
+}
 pub type NanocodeBuilder<B = nanocode_agent::Unselected> =
     nanocode_agent::RuntimeBuilder<B, Defaults>;
 pub use nanocode_agent::{ChildHost, ChildSpec, ChildToolCall, ChildTurn, RemoteChildren};

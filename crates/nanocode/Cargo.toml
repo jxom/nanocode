@@ -29,6 +29,8 @@ nanocode-backend-claude = { workspace = true }
 nanocode-durability = { workspace = true   }
 nanocode-subagents.workspace = true
 nanocode-turnlog.workspace = true
+nanocode-agent-config.workspace = true
+nanocode-agent-core.workspace = true
 nanocode-code-mode = { path = "../runtime/code-mode", version = "0.7.0"   }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

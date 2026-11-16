@@ -155,11 +155,14 @@ enum Source<'a> {
 }
 
 pub struct Decoder<'a> {
+    bytes: &'a [u8],
+    format: Format,
     source: Source<'a>,
     width: u32,
     height: u32,
     bytes_per_pixel: u64,
     limits: Limits,
+    reserved: bool,
 }
 
 pub struct Decoded {
@@ -213,12 +216,38 @@ impl<'a> Decoder<'a> {
             return Err(DecodeError::DimensionsTooLarge { width, height });
         }
         Ok(Self {
+            bytes,
+            format,
             source,
             width,
             height,
             bytes_per_pixel,
             limits,
+            reserved: false,
         })
+    }
+
+    pub const fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub const fn format(&self) -> Format {
+        self.format
+    }
+
+    pub const fn limits(&self) -> Limits {
+        if self.reserved {
+            Limits {
+                alloc_bytes_max: self.limits.alloc_bytes_max + self.total_bytes(),
+                ..self.limits
+            }
+        } else {
+            self.limits
+        }
+    }
+
+    pub const fn reserved(&self) -> bool {
+        self.reserved
     }
 
     pub const fn dimensions(&self) -> (u32, u32) {
@@ -242,10 +271,17 @@ impl<'a> Decoder<'a> {
         self.limits.alloc_bytes_max = max
             .checked_sub(bytes)
             .ok_or(DecodeError::AllocationTooLarge { bytes, max })?;
+        self.reserved = true;
         Ok(())
     }
 
     pub fn decode(self) -> Result<Decoded, DecodeError> {
+        crate::codec::installed()
+            .ok_or(DecodeError::Unsupported(self.format))?
+            .decode(self)
+    }
+
+    pub(crate) fn decode_builtin(self) -> Result<Decoded, DecodeError> {
         let total = self.total_bytes();
         if usize::try_from(total).is_err() || total > isize::MAX as u64 {
             return Err(DecodeError::AllocationTooLarge {

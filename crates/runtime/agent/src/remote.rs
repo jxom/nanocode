@@ -111,6 +111,10 @@ impl RemoteChildren {
         children
     }
 
+    pub(crate) fn factory(self: &Arc<Self>) -> Arc<dyn AgentFactory> {
+        Arc::new(ChildFactory(Arc::clone(self)))
+    }
+
     pub(crate) fn set_spawn_factory(&self, factory: Arc<dyn AgentFactory>) {
         self.spawn_factory.set(Some(factory));
     }
@@ -321,6 +325,19 @@ impl AgentFactory for ChildFactory {
         host_context: Option<Arc<str>>,
     ) -> BackendFuture<Result<(Agent, AgentEvents)>> {
         Box::pin(Arc::clone(&self.0).spawn(parent, options, host_context))
+    }
+
+    fn respawn(
+        &self,
+        parent: AgentHandle,
+        options: SpawnOptions,
+        host_context: Option<Arc<str>>,
+    ) -> Option<BackendFuture<Result<(Agent, AgentEvents)>>> {
+        Some(Box::pin(Arc::clone(&self.0).respawn(
+            parent,
+            options,
+            host_context,
+        )))
     }
 
     fn settings(&self, parent: AgentHandle) -> BackendFuture<Result<(ModelSelection, Thinking)>> {

@@ -253,9 +253,13 @@ impl<B, D: RuntimeDefaults> RuntimeBuilder<B, D> {
         if self.data.durability.is_none() {
             self.data.durability = Some(D::default_store().map_err(Arc::new));
         }
+        if D::BUILTIN_CODEC {
+            nanocode_tool_host::image::install(&nanocode_tool_host::image::Builtin);
+        }
         let host = self.defaults.build()?;
         let services: Arc<dyn HostServices> = host.clone();
-        let inner = assemble(self.data, preferred, services)?;
+        let delegates = D::SUBAGENTS.then_some(crate::delegates::open as crate::delegates::Open);
+        let inner = assemble(self.data, preferred, services, delegates)?;
         Ok(Runtime { inner, host })
     }
 
@@ -300,6 +304,7 @@ fn assemble(
     data: Assembly,
     preferred: Option<HarnessFamily>,
     services: Arc<dyn HostServices>,
+    delegates: Option<crate::delegates::Open>,
 ) -> Result<AgentRuntime> {
     let mut configured = Vec::new();
 
@@ -402,26 +407,19 @@ fn assemble(
             }
         }
     }
-    let (subagents, subagent_control, subagent_updates) = if data.subagents_disabled {
-        (None, None, None)
-    } else {
-        let (registry, control, updates) = nanocode_subagents::channel(
-            data.max_subagents
-                .unwrap_or(nanocode_subagents::DEFAULT_MAX_SUBAGENTS),
-        );
-        if !data.subagent_continuation_disabled {
-            let owners = Arc::downgrade(&ownership);
-            registry.set_parent_resolver(Arc::new(move |session_id: &str| {
-                owners.upgrade()?.agent(session_id)
-            }));
+    let (subagents, subagent_updates) = match delegates.filter(|_| !data.subagents_disabled) {
+        Some(open) => {
+            let (delegates, updates) = open(crate::delegates::Wiring {
+                continuation: !data.subagent_continuation_disabled,
+                limit: data
+                    .max_subagents
+                    .unwrap_or(nanocode_subagents::DEFAULT_MAX_SUBAGENTS),
+                owners: Arc::downgrade(&ownership),
+                services: Arc::downgrade(&services),
+            });
+            (Some(delegates), Some(updates))
         }
-        let released = Arc::downgrade(&services);
-        registry.set_session_released(Arc::new(move |session_id: &str| {
-            if let Some(services) = released.upgrade() {
-                services.unregister(session_id);
-            }
-        }));
-        (Some(registry), Some(control), Some(updates))
+        None => (None, None),
     };
     let subagent_updates: UpdateSlot = Arc::new(SwapOption::from(subagent_updates.map(Arc::new)));
     let mut recipes: Vec<(HarnessFamily, Recipe)> = Vec::new();
@@ -437,7 +435,7 @@ fn assemble(
                 &data.settings,
                 &workspace,
                 services.clone(),
-                subagents.clone(),
+                subagents.as_ref().map(|delegates| delegates.tools()),
             ),
         ));
     }
@@ -450,7 +448,7 @@ fn assemble(
             *recipe = persistent_recipe(recipe.clone(), store.clone(), workspace.clone());
         }
     }
-    if subagent_control.is_some() {
+    if subagents.is_some() {
         for (_, recipe) in &mut recipes {
             *recipe = unclaimed_updates_recipe(recipe.clone(), subagent_updates.clone());
         }
@@ -461,15 +459,15 @@ fn assemble(
     let mut router = Harness::builder();
     let remote = match (data.child_host, &subagents) {
         (None, _) => None,
-        (Some(host), Some(registry)) => Some(crate::RemoteChildren::new(host, registry)),
+        (Some(host), Some(delegates)) => Some(delegates.remote(host)),
         (Some(_), None) => {
             return Err(NanocodeError::InvalidRequest(
                 "a child host requires subagents".into(),
             ));
         }
     };
-    if let Some(remote) = &remote {
-        router = router.remote_children(Arc::clone(remote));
+    if let Some((_, factory)) = &remote {
+        router = router.remote_children(Arc::clone(factory));
     }
 
     if let Some(store) = &durability {
@@ -486,6 +484,7 @@ fn assemble(
     }
     services.activate();
     let harness = router.build_tracked(Arc::downgrade(&ownership));
+    let remote = remote.map(|(remote, _)| remote);
     if let Some(remote) = &remote {
         remote.set_spawn_factory(harness.spawn_factory());
     }
@@ -499,7 +498,7 @@ fn assemble(
         services,
 
         durability,
-        subagents: subagent_control,
+        subagents,
         subagent_updates,
     });
     if inner.durability.is_some() {
@@ -608,7 +607,7 @@ fn backend_recipe(
     runtime: &Settings,
     workspace: &Arc<Path>,
     services: Arc<dyn HostServices>,
-    subagents: Option<Arc<nanocode_subagents::Registry>>,
+    subagents: Option<Arc<dyn DelegationTools>>,
 ) -> Recipe {
     let workspace = workspace.clone();
     let defaults = runtime.clone();
@@ -636,14 +635,12 @@ fn backend_recipe(
             defaults: defaults.clone(),
             workspace: workspace.clone(),
             services: services.clone(),
-            subagents: subagents
-                .clone()
-                .map(|registry| Arc::new(Delegation(registry)) as Arc<dyn DelegationTools>),
+            subagents: subagents.clone(),
         })
     })
 }
 
-struct Delegation(Arc<nanocode_subagents::Registry>);
+pub(crate) struct Delegation(pub(crate) Arc<nanocode_subagents::Registry>);
 
 impl DelegationTools for Delegation {
     fn tools(
@@ -876,7 +873,7 @@ struct RuntimeState {
     services: Arc<dyn HostServices>,
 
     durability: Option<crate::durability::SessionStore>,
-    subagents: Option<nanocode_subagents::SubagentControl>,
+    subagents: Option<Arc<dyn crate::delegates::Delegates>>,
     subagent_updates: UpdateSlot,
 }
 
@@ -928,7 +925,14 @@ impl AgentRuntime {
 
     #[must_use]
     pub fn subagents(&self) -> Option<&nanocode_subagents::SubagentControl> {
-        self.inner.subagents.as_ref()
+        self.inner
+            .subagents
+            .as_deref()
+            .map(crate::delegates::Delegates::control)
+    }
+
+    pub(crate) fn delegates(&self) -> Option<&dyn crate::delegates::Delegates> {
+        self.inner.subagents.as_deref()
     }
 
     #[must_use]
@@ -1084,8 +1088,9 @@ impl AgentRuntime {
             .filter(|transcript| !transcript.is_empty());
         let _preload = CheckpointPreload(durable_state.clone());
         let _journal = match &self.inner.subagents {
-            Some(control) => JournalReservation::new(control.registry(), &durable_state)
-                .map_err(catalog_error)?,
+            Some(delegates) => {
+                JournalReservation::new(delegates, &durable_state).map_err(catalog_error)?
+            }
             None => None,
         };
         let mut options = SpawnOptions::new()
@@ -1225,8 +1230,8 @@ impl AgentRuntime {
     }
 
     pub async fn shutdown(&self) -> Result<()> {
-        if let Some(subagents) = &self.inner.subagents {
-            subagents.shutdown().await;
+        if let Some(delegates) = &self.inner.subagents {
+            delegates.shutdown().await;
         }
         self.inner.services.close();
         let host_result = self.inner.services.shutdown().await;
@@ -1367,7 +1372,7 @@ struct Prepared<'a> {
 }
 
 struct JournalReservation {
-    registry: Arc<nanocode_subagents::Registry>,
+    delegates: Arc<dyn crate::delegates::Delegates>,
     root: String,
     journal: nanocode_agent_core::backend::ChildJournal,
     _seed: crate::durability::JournalSeed,
@@ -1375,7 +1380,7 @@ struct JournalReservation {
 
 impl JournalReservation {
     fn new(
-        registry: &Arc<nanocode_subagents::Registry>,
+        delegates: &Arc<dyn crate::delegates::Delegates>,
         state: &crate::durability::DurableSession,
     ) -> crate::durability::Result<Option<Self>> {
         use crate::durability::StateStore as _;
@@ -1384,11 +1389,11 @@ impl JournalReservation {
         }
         let root = state.state_id().to_owned();
         let (journal, seed) = state.seeded_child_journal();
-        if !registry.reserve_journal(&root, journal.clone()) {
+        if !delegates.reserve_journal(&root, journal.clone()) {
             return Ok(None);
         }
         let reservation = Self {
-            registry: Arc::clone(registry),
+            delegates: Arc::clone(delegates),
             root,
             journal,
             _seed: seed,
@@ -1400,7 +1405,7 @@ impl JournalReservation {
 
 impl Drop for JournalReservation {
     fn drop(&mut self) {
-        self.registry.release_journal(&self.root, &self.journal);
+        self.delegates.release_journal(&self.root, &self.journal);
     }
 }
 
@@ -1595,7 +1600,7 @@ impl Ownership {
         self.services.get().and_then(std::sync::Weak::upgrade)
     }
 
-    fn agent(&self, session_id: &str) -> Option<Agent> {
+    pub(crate) fn agent(&self, session_id: &str) -> Option<Agent> {
         self.owned.read(|owned| {
             owned
                 .values()
