@@ -103,6 +103,9 @@ pub enum CheckpointPayload {
 impl CheckpointPayload {
     pub fn decode<T: serde::de::DeserializeOwned>(&self) -> serde_json::Result<T> {
         match self {
+            #[cfg(not(target_family = "wasm"))]
+            Self::Tree(tree) => T::deserialize(tree),
+            #[cfg(target_family = "wasm")]
             Self::Tree(tree) => serde_json::from_value(tree.clone()),
             Self::Json(json) => serde_json::from_str(json.get()),
         }

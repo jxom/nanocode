@@ -297,15 +297,38 @@ mod from;
 mod index;
 mod partial_eq;
 mod ser;
+#[cfg(target_family = "wasm")]
+mod simple;
 
+#[cfg(not(target_family = "wasm"))]
 pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
     T: Serialize,
 {
+    value.serialize(Serializer)
+}
+
+#[cfg(target_family = "wasm")]
+pub fn to_value<T>(value: T) -> Result<Value, Error>
+where
+    T: Serialize,
+{
+    if let Ok(simple) = value.serialize(simple::Simple) {
+        return Ok(simple);
+    }
     let text = crate::to_vec(&value)?;
     crate::from_slice(&text).map_err(Error::unplaced)
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub fn from_value<T>(value: Value) -> Result<T, Error>
+where
+    T: DeserializeOwned,
+{
+    T::deserialize(value)
+}
+
+#[cfg(target_family = "wasm")]
 pub fn from_value<T>(value: Value) -> Result<T, Error>
 where
     T: DeserializeOwned,

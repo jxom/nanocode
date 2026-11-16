@@ -104,6 +104,7 @@ impl From<Error> for io::Error {
     }
 }
 
+#[cfg(target_family = "wasm")]
 impl Error {
     pub(crate) fn unplaced(mut self) -> Self {
         self.err.line = 0;
