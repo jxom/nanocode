@@ -55,6 +55,15 @@ macro_rules! json_internal {
 
     (@object $object:ident () () ()) => {};
 
+    (@object $object:ident [$key:literal] ($value:expr) , $($rest:tt)*) => {
+        $crate::__private::insert(&mut $object, $key, $value);
+        $crate::json_internal!(@object $object () ($($rest)*) ($($rest)*));
+    };
+
+    (@object $object:ident [$key:literal] ($value:expr)) => {
+        $crate::__private::insert(&mut $object, $key, $value);
+    };
+
     (@object $object:ident [$($key:tt)+] ($value:expr) , $($rest:tt)*) => {
         let _ = $object.insert(($($key)+).into(), $value);
         $crate::json_internal!(@object $object () ($($rest)*) ($($rest)*));
@@ -156,8 +165,12 @@ macro_rules! json_internal {
         })
     };
 
+    ($other:literal) => {
+        $crate::Value::from($other)
+    };
+
     ($other:expr) => {
-        $crate::to_value(&$other).unwrap()
+        $crate::__private::to_value(&$other)
     };
 }
 

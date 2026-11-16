@@ -17,9 +17,9 @@ mod resample;
 mod thumbnail;
 mod window;
 
-pub use codec::{Builtin, Codec, Encoding, encode, install};
+pub use codec::{Builtin, Codec, Encoding, Filter, encode, install};
 pub use decode::{
-    DEFAULT_ALLOC_BYTES_MAX, DecodeError, Decoded, Decoder, Format, Limits, dimensions,
+    DEFAULT_ALLOC_BYTES_MAX, DecodeError, Decoded, Decoder, Format, Header, Limits, dimensions,
     guess_format,
 };
 pub use window::ImageWindow;

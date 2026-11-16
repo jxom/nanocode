@@ -1480,7 +1480,6 @@ version = "1.0.150"
 dependencies = [
  "indexmap",
  "itoa",
- "nanocode-sys",
  "serde_core",
 ]
 

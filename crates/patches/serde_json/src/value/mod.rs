@@ -302,12 +302,14 @@ pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
     T: Serialize,
 {
-    value.serialize(Serializer)
+    let text = crate::to_vec(&value)?;
+    crate::from_slice(&text).map_err(Error::unplaced)
 }
 
 pub fn from_value<T>(value: Value) -> Result<T, Error>
 where
     T: DeserializeOwned,
 {
-    T::deserialize(value)
+    let text = crate::to_vec(&value)?;
+    crate::from_slice(&text).map_err(Error::unplaced)
 }

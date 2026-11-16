@@ -1,10 +1,11 @@
 use nanocode_sys::adler32::Adler32Instructions;
 use nanocode_sys::crc32::Crc32Instructions;
+use std::sync::LazyLock;
 
 const CRC32_POLYNOMIAL: u32 = 0xEDB8_8320;
 const CRC32_TABLES: usize = 16;
 const BYTE_VALUES: usize = 256;
-static CRC32_TABLE: [[u32; BYTE_VALUES]; CRC32_TABLES] = crc32_tables();
+static CRC32_TABLE: LazyLock<[[u32; BYTE_VALUES]; CRC32_TABLES]> = LazyLock::new(crc32_tables);
 const ADLER32_MODULUS: u32 = 65_521;
 const ADLER32_REDUCE_BYTES: usize = 5_552;
 const ADLER32_LANES: usize = 32;
@@ -52,20 +53,25 @@ pub fn crc32(start: u32, data: &[u8]) -> u32 {
 }
 
 fn crc32_table(start: u32, data: &[u8]) -> u32 {
+    let table = &*CRC32_TABLE;
     let mut crc = !start;
     let (blocks, rest) = data.as_chunks::<CRC32_TABLES>();
     for block in blocks {
-        crc = crc32_block(crc, block);
+        crc = crc32_block(table, crc, block);
     }
     for byte in rest {
-        crc = (crc >> u8::BITS) ^ CRC32_TABLE[0][usize::from(crc.to_le_bytes()[0] ^ byte)];
+        crc = (crc >> u8::BITS) ^ table[0][usize::from(crc.to_le_bytes()[0] ^ byte)];
     }
     !crc
 }
 
-fn crc32_block(crc: u32, block: &[u8; CRC32_TABLES]) -> u32 {
+fn crc32_block(
+    table: &[[u32; BYTE_VALUES]; CRC32_TABLES],
+    crc: u32,
+    block: &[u8; CRC32_TABLES],
+) -> u32 {
     let low = crc.to_le_bytes();
-    let entry = |index: usize, byte: u8| CRC32_TABLE[CRC32_TABLES - 1 - index][usize::from(byte)];
+    let entry = |index: usize, byte: u8| table[CRC32_TABLES - 1 - index][usize::from(byte)];
     entry(0, block[0] ^ low[0])
         ^ entry(1, block[1] ^ low[1])
         ^ entry(2, block[2] ^ low[2])

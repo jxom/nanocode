@@ -103,7 +103,7 @@ pub enum CheckpointPayload {
 impl CheckpointPayload {
     pub fn decode<T: serde::de::DeserializeOwned>(&self) -> serde_json::Result<T> {
         match self {
-            Self::Tree(tree) => T::deserialize(tree),
+            Self::Tree(tree) => serde_json::from_value(tree.clone()),
             Self::Json(json) => serde_json::from_str(json.get()),
         }
     }

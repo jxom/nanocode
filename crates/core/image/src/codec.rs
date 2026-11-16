@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use crate::decode::{DecodeError, Decoded, Decoder, Format};
+use crate::decode::{DecodeError, Decoded, Decoder, Format, Header, Limits};
 use crate::pixels::{Image, Pixels};
 
 static CODEC: OnceLock<&'static dyn Codec> = OnceLock::new();
@@ -8,6 +8,14 @@ static CODEC: OnceLock<&'static dyn Codec> = OnceLock::new();
 pub trait Codec: Send + Sync {
     fn decode(&self, decoder: Decoder<'_>) -> Result<Decoded, DecodeError>;
     fn encode(&self, encoding: Encoding<'_>) -> Result<Vec<u8>, String>;
+    fn inspect(&self, bytes: &[u8], format: Format, limits: Limits) -> Result<Header, DecodeError>;
+    fn resize(&self, image: &Image, width: u32, height: u32, filter: Filter) -> Image;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filter {
+    Lanczos3,
+    Thumbnail,
 }
 
 #[derive(Clone, Copy)]
@@ -24,6 +32,17 @@ pub struct Builtin;
 impl Codec for Builtin {
     fn decode(&self, decoder: Decoder<'_>) -> Result<Decoded, DecodeError> {
         decoder.decode_builtin()
+    }
+
+    fn inspect(&self, bytes: &[u8], format: Format, limits: Limits) -> Result<Header, DecodeError> {
+        crate::decode::parse(bytes, format, limits).map(|(header, _)| header)
+    }
+
+    fn resize(&self, image: &Image, width: u32, height: u32, filter: Filter) -> Image {
+        match filter {
+            Filter::Lanczos3 => crate::resample::resample(image, width, height),
+            Filter::Thumbnail => crate::thumbnail::sample(image, width, height),
+        }
     }
 
     fn encode(&self, encoding: Encoding<'_>) -> Result<Vec<u8>, String> {
@@ -100,6 +119,13 @@ pub(crate) fn installed() -> Option<&'static dyn Codec> {
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn installed() -> Option<&'static dyn Codec> {
     Some(CODEC.get().copied().unwrap_or(&Builtin))
+}
+
+pub(crate) fn resize(image: &Image, width: u32, height: u32, filter: Filter) -> Image {
+    installed().map_or_else(
+        || image.clone(),
+        |codec| codec.resize(image, width, height, filter),
+    )
 }
 
 pub fn encode(encoding: Encoding<'_>) -> Result<Vec<u8>, String> {
