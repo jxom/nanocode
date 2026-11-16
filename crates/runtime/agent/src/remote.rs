@@ -111,6 +111,10 @@ impl RemoteChildren {
         children
     }
 
+    pub(crate) fn factory(self: &Arc<Self>) -> Arc<dyn AgentFactory> {
+        Arc::new(ChildFactory(Arc::clone(self)))
+    }
+
     pub(crate) fn set_spawn_factory(&self, factory: Arc<dyn AgentFactory>) {
         self.spawn_factory.set(Some(factory));
     }

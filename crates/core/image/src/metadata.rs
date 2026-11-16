@@ -1,4 +1,4 @@
-use super::{ImagePreparationError, RgbLayout};
+use super::ImagePreparationError;
 
 pub(super) fn png_exif(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut offset = 8usize;
@@ -99,44 +99,4 @@ pub(super) fn gif_icc(bytes: &[u8]) -> Option<Vec<u8>> {
         }
     }
     profile
-}
-
-pub(super) fn encode_png(
-    pixels: &[u8],
-    width: u32,
-    height: u32,
-    layout: RgbLayout,
-    icc: Option<Vec<u8>>,
-    exif: Option<Vec<u8>>,
-) -> Vec<u8> {
-    let icc = icc.filter(|data| !data.is_empty());
-    let exif = exif.filter(|data| !data.is_empty());
-    nanocode_png::encode(&nanocode_png::Encoding {
-        width,
-        height,
-        color: match layout {
-            RgbLayout::Rgb => nanocode_png::Color::Rgb8,
-            RgbLayout::Rgba => nanocode_png::Color::Rgba8,
-        },
-        pixels: nanocode_png::Pixels::Eight(pixels),
-        icc_profile: icc.as_deref(),
-        exif: exif.as_deref(),
-    })
-}
-
-pub(super) fn insert_jpeg_exif(
-    bytes: &mut Vec<u8>,
-    exif: &[u8],
-) -> Result<(), ImagePreparationError> {
-    if exif.is_empty() {
-        return Ok(());
-    }
-    let length = exif.len().checked_add(2 + b"Exif\0\0".len()).and_then(|length| u16::try_from(length).ok()).ok_or_else(|| ImagePreparationError::Processing("unable to encode image as Jpeg: Exif metadata exceeds the JPEG APP1 segment length".into()))?;
-    let mut segment = Vec::with_capacity(2 + usize::from(length));
-    segment.extend_from_slice(&[0xff, 0xe1]);
-    segment.extend_from_slice(&length.to_be_bytes());
-    segment.extend_from_slice(b"Exif\0\0");
-    segment.extend_from_slice(exif);
-    bytes.splice(2..2, segment);
-    Ok(())
 }

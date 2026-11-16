@@ -22,7 +22,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-nanocode-jpeg.workspace = true
 
 [lints]
 workspace = true

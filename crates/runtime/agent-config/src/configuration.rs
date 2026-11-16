@@ -147,6 +147,8 @@ pub trait RuntimeDefaults: Clone + Default + Send + Sync + 'static {
     type Codex: RuntimeBackend;
     type Claude: RuntimeBackend;
     type Host: HostServices;
+    const BUILTIN_CODEC: bool = true;
+    const SUBAGENTS: bool = true;
     fn preferred_backend(existing: &[BackendId]) -> Option<BackendId>;
     fn default_backends(existing: &[BackendId]) -> Vec<Arc<dyn RuntimeBackend>>;
     fn default_store() -> nanocode_durability::Result<SessionStore>;

@@ -2,6 +2,7 @@ pub use nanocode_agent_config::configuration;
 pub use nanocode_agent_core::Agent;
 pub use nanocode_agent_core::*;
 pub use nanocode_durability as durability;
+mod delegates;
 mod handoff;
 mod one_log;
 mod remote;

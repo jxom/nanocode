@@ -165,6 +165,6 @@ impl AgentRuntime {
     }
 
     pub async fn persist_subagents(&self, agent: &Agent) -> Option<std::io::Result<()>> {
-        Some(self.subagents()?.persist(agent.session_id()).await)
+        Some(self.delegates()?.persist(agent.session_id()).await)
     }
 }

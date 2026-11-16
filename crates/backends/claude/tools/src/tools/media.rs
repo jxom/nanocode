@@ -139,15 +139,20 @@ fn image_block(bytes: &[u8]) -> Result<ToolResultBlock, String> {
                     .map(|i| ((u16::from(p[i]) * alpha + 255 * (255 - alpha) + 127) / 255) as u8)
             })
             .collect();
+        let flattened = nanocode_image::Image::new(
+            resized.width(),
+            resized.height(),
+            nanocode_image::Pixels::Rgb8(rgb),
+        )
+        .ok_or("image compression: inconsistent dimensions")?;
         for quality in [80, 60, 40, 20] {
-            encoded = nanocode_jpeg::encode(
-                &rgb,
-                resized.width(),
-                resized.height(),
-                nanocode_jpeg::Color::Rgb,
+            encoded = nanocode_image::encode(nanocode_image::Encoding {
+                exif: None,
+                format: nanocode_image::Format::Jpeg,
+                icc_profile: None,
+                image: &flattened,
                 quality,
-                None,
-            )
+            })
             .map_err(|e| format!("image compression: {e}"))?;
             if encoded.len() <= TARGET_RAW_IMAGE {
                 break;
