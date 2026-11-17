@@ -15,12 +15,44 @@ use crate::ImageDetail;
 
 pub const DEFAULT_TOOL_OUTPUT_TOKENS: usize = usize::MAX;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum ToolOutputBody {
     Text(String),
 
     Content(Vec<ToolOutputContent>),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ToolOutputBody {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ToolOutputBody;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum ToolOutputBody")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<ToolOutputBody, E> {
+                Ok(ToolOutputBody::Text(text.to_owned()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, text: String) -> Result<ToolOutputBody, E> {
+                Ok(ToolOutputBody::Text(text))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<ToolOutputBody, A::Error> {
+                Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(ToolOutputBody::Content)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 impl ToolOutputBody {

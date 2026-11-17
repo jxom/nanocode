@@ -32,6 +32,36 @@ pub enum ImageReference {
         file_id: String,
     },
 }
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ImageReference {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            image_url: Option<String>,
+            file_id: Option<String>,
+        }
+        match Wire::deserialize(deserializer)? {
+            Wire {
+                image_url: Some(image_url),
+                file_id: None,
+            } => Ok(Self::Inline { image_url }),
+            Wire {
+                image_url: None,
+                file_id: Some(file_id),
+            } if valid_image_file_id(&file_id) => Ok(Self::File { file_id }),
+            Wire {
+                image_url: None,
+                file_id: Some(_),
+            } => Err(serde::de::Error::custom("invalid image file_id")),
+            Wire { .. } => Err(serde::de::Error::custom(
+                "data did not match any variant of untagged enum Wire",
+            )),
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
 impl<'de> Deserialize<'de> for ImageReference {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]

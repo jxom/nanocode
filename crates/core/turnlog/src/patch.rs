@@ -4,11 +4,39 @@ use nanocode_durability_core::StoreError;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 enum Edit<'a> {
     Copy(usize, usize),
     Insert(Cow<'a, str>),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for Edit<'_> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Edit<'static>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum Edit")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Edit<'static>, E> {
+                Ok(Edit::Insert(Cow::Owned(text.to_owned())))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Edit<'static>, A::Error> {
+                <(usize, usize)>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(|(from, len)| Edit::Copy(from, len))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 const PRIME: u64 = 0x0000_0100_0000_01b3;

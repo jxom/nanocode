@@ -226,8 +226,6 @@ fn deserialize_map(
         .iter()
         .filter(|&&(field, _)| !field.attrs.skip_deserializing() && !field.attrs.flatten())
         .map(|(field, name)| {
-            let deser_name = field.attrs.name().deserialize_name();
-
             let visit = match field.attrs.deserialize_with() {
                 None => {
                     let field_ty = field.ty;
@@ -253,9 +251,6 @@ fn deserialize_map(
             };
             quote! {
                 __Field::#name => {
-                    if _serde::#private::Option::is_some(&#name) {
-                        return _serde::#private::Err(<__A::Error as _serde::de::Error>::duplicate_field(#deser_name));
-                    }
                     #name = _serde::#private::Some(#visit);
                 }
             }

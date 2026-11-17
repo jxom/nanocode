@@ -107,7 +107,18 @@ impl RetryAfter {
             |(whole, fraction)| (whole.is_empty() || digits(whole)) && digits(fraction),
         );
         let delay = if numeric {
-            Duration::try_from_secs_f64(value.parse().ok()?).ok()?
+            let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+            let seconds = if whole.is_empty() {
+                0
+            } else {
+                whole.parse().ok()?
+            };
+            let nanos = fraction
+                .bytes()
+                .chain(std::iter::repeat(b'0'))
+                .take(9)
+                .fold(0, |nanos, digit| nanos * 10 + u32::from(digit - b'0'));
+            Duration::new(seconds, nanos)
         } else {
             let date = nanocode_platform::parse_http_date(value).ok()?;
             let since_epoch = date.duration_since(std::time::UNIX_EPOCH).ok()?;

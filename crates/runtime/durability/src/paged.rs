@@ -70,11 +70,41 @@ pub struct Sequence {
     tail: Option<Tail>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 enum Tail {
     Sealed(Sealed),
     Chained(EncodedPayload),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for Tail {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Tail;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum Tail")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, key: &str) -> std::result::Result<Tail, E> {
+                Ok(Tail::Chained(EncodedPayload::by_key(key)))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> std::result::Result<Tail, A::Error> {
+                Sealed::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(Tail::Sealed)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]

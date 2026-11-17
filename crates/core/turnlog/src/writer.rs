@@ -1412,7 +1412,15 @@ impl Lease<'_> {
         self.committed(point, Some(rider)).await
     }
 
-    async fn committed(
+    fn committed<'b>(
+        &'b mut self,
+        point: Point,
+        rider: Option<Rider<'b>>,
+    ) -> nanocode_durability_core::StoreFuture<'b, Result<(u64, bool), StoreError>> {
+        Box::pin(self.write(point, rider))
+    }
+
+    async fn write(
         &mut self,
         point: Point,
         rider: Option<Rider<'_>>,

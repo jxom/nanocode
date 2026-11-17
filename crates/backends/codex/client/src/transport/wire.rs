@@ -75,17 +75,37 @@ pub(crate) fn turn_state_from_event(text: &str) -> Option<String> {
     if text.starts_with(r#"{"type":""#) && !text.starts_with(r#"{"type":"response.metadata""#) {
         return None;
     }
-    let Ok(MetadataEvent::Metadata { headers }) = serde_json::from_str(text) else {
-        return None;
-    };
-    headers.into_iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case(TURN_STATE_HEADER)
-            .then_some(value)
-    })
+    metadata_headers(text)?
+        .into_iter()
+        .find_map(|(name, value)| {
+            name.eq_ignore_ascii_case(TURN_STATE_HEADER)
+                .then_some(value)
+        })
 }
 
 const TURN_STATE_HEADER: &str = "x-codex-turn-state";
 
+#[cfg(not(target_family = "wasm"))]
+fn metadata_headers(text: &str) -> Option<HashMap<String, String>> {
+    match serde_json::from_str(text) {
+        Ok(MetadataEvent::Metadata { headers }) => Some(headers),
+        _ => None,
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn metadata_headers(text: &str) -> Option<HashMap<String, String>> {
+    let mut event: serde_json::Map<String, serde_json::Value> = serde_json::from_str(text).ok()?;
+    if event.get("type")?.as_str()? != "response.metadata" {
+        return None;
+    }
+    event
+        .remove("headers")
+        .map_or(Ok(HashMap::new()), HashMap::deserialize)
+        .ok()
+}
+
+#[cfg(not(target_family = "wasm"))]
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 enum MetadataEvent {

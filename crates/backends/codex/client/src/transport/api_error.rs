@@ -247,9 +247,40 @@ struct UpstreamError {
     code: u16,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
+#[cfg_attr(not(target_family = "wasm"), serde(untagged))]
 enum RetryAfterValue {
     Number(f64),
     String(Box<str>),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for RetryAfterValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = RetryAfterValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum RetryAfterValue")
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<RetryAfterValue, E> {
+                Ok(RetryAfterValue::Number(value))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<RetryAfterValue, E> {
+                Ok(RetryAfterValue::Number(value as f64))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<RetryAfterValue, E> {
+                Ok(RetryAfterValue::Number(value as f64))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<RetryAfterValue, E> {
+                Ok(RetryAfterValue::String(value.into()))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }

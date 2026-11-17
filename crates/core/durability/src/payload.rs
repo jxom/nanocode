@@ -566,168 +566,192 @@ impl EncodedPayload {
         }
     }
 
-    pub async fn load(&self, store: &mut dyn crate::StateStore, state_id: &str) -> Result<Self> {
-        self.load_noting(store, state_id, &mut HashSet::new()).await
+    pub fn load<'a>(
+        &'a self,
+        store: &'a mut dyn crate::StateStore,
+        state_id: &'a str,
+    ) -> crate::StoreFuture<'a, Result<Self>> {
+        Box::pin(async move { self.load_noting(store, state_id, &mut HashSet::new()).await })
     }
 
-    pub async fn load_noting(
-        &self,
-        store: &mut dyn crate::StateStore,
-        state_id: &str,
-        read: &mut HashSet<String>,
-    ) -> Result<Self> {
-        if self.content().is_some() {
-            return Ok(self.clone());
-        }
-        let record = store
-            .read_record(state_id, self.key())
-            .await?
-            .ok_or_else(|| Error::InvalidState(format!("missing payload record {}", self.key())))?;
-        read.insert(self.key().to_owned());
-        self.load_record(&mut Noting { store, read }, state_id, record)
-            .await
-    }
-
-    pub async fn read(&self, reader: &mut dyn crate::StateReader, state_id: &str) -> Result<Self> {
-        if self.content().is_some() {
-            return Ok(self.clone());
-        }
-        let record = reader
-            .read_records(state_id, std::slice::from_ref(&self.key().to_owned()))
-            .await?
-            .pop()
-            .flatten()
-            .ok_or_else(|| Error::InvalidState(format!("missing payload record {}", self.key())))?;
-        self.load_record(reader, state_id, record).await
-    }
-
-    pub async fn read_many(
-        values: &[Self],
-        reader: &mut dyn crate::StateReader,
-        state_id: &str,
-    ) -> Result<Vec<Self>> {
-        if values.is_empty() {
-            return Ok(Vec::new());
-        }
-        if values.iter().any(|value| value.content().is_some()) {
-            let missing: Vec<Self> = values
-                .iter()
-                .filter(|value| value.content().is_none())
-                .cloned()
-                .collect();
-            let mut loaded = Box::pin(Self::read_many(&missing, reader, state_id))
-                .await?
-                .into_iter();
-            return values
-                .iter()
-                .map(|value| match value.content() {
-                    Some(_) => Ok(value.clone()),
-                    None => loaded
-                        .next()
-                        .ok_or_else(|| Error::InvalidState("record batch length mismatch".into())),
-                })
-                .collect();
-        }
-        let keys: Vec<_> = values.iter().map(|value| value.key().to_owned()).collect();
-        let records = reader.read_records(state_id, &keys).await?;
-        if records.len() != values.len() {
-            return Err(Error::InvalidState("record batch length mismatch".into()));
-        }
-        let records = values
-            .iter()
-            .zip(records)
-            .map(|(value, record)| {
-                record.ok_or_else(|| {
-                    Error::InvalidState(format!("missing payload record {}", value.key()))
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Self::load_records(values, reader, state_id, records).await
-    }
-
-    pub async fn load_many(
-        values: &[Self],
-        store: &mut dyn crate::StateStore,
-        state_id: &str,
-    ) -> Result<Vec<Self>> {
-        Self::load_many_noting(values, store, state_id, &mut HashSet::new()).await
-    }
-
-    pub async fn load_many_noting(
-        values: &[Self],
-        store: &mut dyn crate::StateStore,
-        state_id: &str,
-        read: &mut HashSet<String>,
-    ) -> Result<Vec<Self>> {
-        if values.is_empty() {
-            return Ok(Vec::new());
-        }
-        if values.iter().any(|value| value.content().is_some()) {
-            let missing: Vec<Self> = values
-                .iter()
-                .filter(|value| value.content().is_none())
-                .cloned()
-                .collect();
-            let mut loaded = Box::pin(Self::load_many_noting(&missing, store, state_id, read))
-                .await?
-                .into_iter();
-            return values
-                .iter()
-                .map(|value| match value.content() {
-                    Some(_) => Ok(value.clone()),
-                    None => loaded
-                        .next()
-                        .ok_or_else(|| Error::InvalidState("record batch length mismatch".into())),
-                })
-                .collect();
-        }
-        let keys: Vec<_> = values.iter().map(|value| value.key().to_owned()).collect();
-        let mut source = Noting { store, read };
-        let records = source.records(state_id, &keys).await?;
-        if records.len() != values.len() {
-            return Err(Error::InvalidState("record batch length mismatch".into()));
-        }
-        let records = values
-            .iter()
-            .zip(records)
-            .map(|(value, record)| {
-                record.ok_or_else(|| {
-                    Error::InvalidState(format!("missing payload record {}", value.key()))
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Self::load_records(values, &mut source, state_id, records).await
-    }
-
-    pub async fn manifests_by_content(
-        store: &mut dyn crate::StateStore,
-        state_id: &str,
-    ) -> Result<HashMap<String, String>> {
-        let mut manifests = HashMap::new();
-        for key in store.list_records(state_id).await? {
-            if !key.starts_with(KEY_PREFIX) {
-                continue;
+    pub fn load_noting<'a>(
+        &'a self,
+        store: &'a mut dyn crate::StateStore,
+        state_id: &'a str,
+        read: &'a mut HashSet<String>,
+    ) -> crate::StoreFuture<'a, Result<Self>> {
+        Box::pin(async move {
+            if self.content().is_some() {
+                return Ok(self.clone());
             }
-            let Some(record) = store.read_record(state_id, &key).await? else {
-                continue;
-            };
-            if !record.starts_with(MANIFEST_PREFIX) && !record.starts_with(TREE_PREFIX) {
-                continue;
+            let record = store
+                .read_record(state_id, self.key())
+                .await?
+                .ok_or_else(|| {
+                    Error::InvalidState(format!("missing payload record {}", self.key()))
+                })?;
+            read.insert(self.key().to_owned());
+            self.load_record(&mut Noting { store, read }, state_id, record)
+                .await
+        })
+    }
+
+    pub fn read<'a>(
+        &'a self,
+        reader: &'a mut dyn crate::StateReader,
+        state_id: &'a str,
+    ) -> crate::StoreFuture<'a, Result<Self>> {
+        Box::pin(async move {
+            if self.content().is_some() {
+                return Ok(self.clone());
             }
-            let read = &mut HashSet::new();
-            let payload = Self::by_key(&key)
-                .load_record(
-                    &mut Noting {
-                        store: &mut *store,
-                        read,
-                    },
-                    state_id,
-                    record,
-                )
-                .await?;
-            manifests.insert(record_key(payload.json()?), key);
-        }
-        Ok(manifests)
+            let record = reader
+                .read_records(state_id, std::slice::from_ref(&self.key().to_owned()))
+                .await?
+                .pop()
+                .flatten()
+                .ok_or_else(|| {
+                    Error::InvalidState(format!("missing payload record {}", self.key()))
+                })?;
+            self.load_record(reader, state_id, record).await
+        })
+    }
+
+    pub fn read_many<'a>(
+        values: &'a [Self],
+        reader: &'a mut dyn crate::StateReader,
+        state_id: &'a str,
+    ) -> crate::StoreFuture<'a, Result<Vec<Self>>> {
+        Box::pin(async move {
+            if values.is_empty() {
+                return Ok(Vec::new());
+            }
+            if values.iter().any(|value| value.content().is_some()) {
+                let missing: Vec<Self> = values
+                    .iter()
+                    .filter(|value| value.content().is_none())
+                    .cloned()
+                    .collect();
+                let mut loaded = Box::pin(Self::read_many(&missing, reader, state_id))
+                    .await?
+                    .into_iter();
+                return values
+                    .iter()
+                    .map(|value| match value.content() {
+                        Some(_) => Ok(value.clone()),
+                        None => loaded.next().ok_or_else(|| {
+                            Error::InvalidState("record batch length mismatch".into())
+                        }),
+                    })
+                    .collect();
+            }
+            let keys: Vec<_> = values.iter().map(|value| value.key().to_owned()).collect();
+            let records = reader.read_records(state_id, &keys).await?;
+            if records.len() != values.len() {
+                return Err(Error::InvalidState("record batch length mismatch".into()));
+            }
+            let records = values
+                .iter()
+                .zip(records)
+                .map(|(value, record)| {
+                    record.ok_or_else(|| {
+                        Error::InvalidState(format!("missing payload record {}", value.key()))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Self::load_records(values, reader, state_id, records).await
+        })
+    }
+
+    pub fn load_many<'a>(
+        values: &'a [Self],
+        store: &'a mut dyn crate::StateStore,
+        state_id: &'a str,
+    ) -> crate::StoreFuture<'a, Result<Vec<Self>>> {
+        Box::pin(async move {
+            Self::load_many_noting(values, store, state_id, &mut HashSet::new()).await
+        })
+    }
+
+    pub fn load_many_noting<'a>(
+        values: &'a [Self],
+        store: &'a mut dyn crate::StateStore,
+        state_id: &'a str,
+        read: &'a mut HashSet<String>,
+    ) -> crate::StoreFuture<'a, Result<Vec<Self>>> {
+        Box::pin(async move {
+            if values.is_empty() {
+                return Ok(Vec::new());
+            }
+            if values.iter().any(|value| value.content().is_some()) {
+                let missing: Vec<Self> = values
+                    .iter()
+                    .filter(|value| value.content().is_none())
+                    .cloned()
+                    .collect();
+                let mut loaded = Box::pin(Self::load_many_noting(&missing, store, state_id, read))
+                    .await?
+                    .into_iter();
+                return values
+                    .iter()
+                    .map(|value| match value.content() {
+                        Some(_) => Ok(value.clone()),
+                        None => loaded.next().ok_or_else(|| {
+                            Error::InvalidState("record batch length mismatch".into())
+                        }),
+                    })
+                    .collect();
+            }
+            let keys: Vec<_> = values.iter().map(|value| value.key().to_owned()).collect();
+            let mut source = Noting { store, read };
+            let records = source.records(state_id, &keys).await?;
+            if records.len() != values.len() {
+                return Err(Error::InvalidState("record batch length mismatch".into()));
+            }
+            let records = values
+                .iter()
+                .zip(records)
+                .map(|(value, record)| {
+                    record.ok_or_else(|| {
+                        Error::InvalidState(format!("missing payload record {}", value.key()))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Self::load_records(values, &mut source, state_id, records).await
+        })
+    }
+
+    pub fn manifests_by_content<'a>(
+        store: &'a mut dyn crate::StateStore,
+        state_id: &'a str,
+    ) -> crate::StoreFuture<'a, Result<HashMap<String, String>>> {
+        Box::pin(async move {
+            let mut manifests = HashMap::new();
+            for key in store.list_records(state_id).await? {
+                if !key.starts_with(KEY_PREFIX) {
+                    continue;
+                }
+                let Some(record) = store.read_record(state_id, &key).await? else {
+                    continue;
+                };
+                if !record.starts_with(MANIFEST_PREFIX) && !record.starts_with(TREE_PREFIX) {
+                    continue;
+                }
+                let read = &mut HashSet::new();
+                let payload = Self::by_key(&key)
+                    .load_record(
+                        &mut Noting {
+                            store: &mut *store,
+                            read,
+                        },
+                        state_id,
+                        record,
+                    )
+                    .await?;
+                manifests.insert(record_key(payload.json()?), key);
+            }
+            Ok(manifests)
+        })
     }
 
     pub(crate) async fn reachable<S: crate::StateStore + ?Sized>(

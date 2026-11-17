@@ -67,13 +67,38 @@ pub fn validate(name: &str, schema: &Value, input: &Value) -> Result<Option<Valu
 }
 
 fn numeric(text: &str) -> Option<Value> {
-    let number = text.trim().parse::<f64>().ok().filter(|n| n.is_finite())?;
+    let number = float(text.trim()).filter(|n| n.is_finite())?;
     if number.fract() == 0.0
         && let Ok(whole) = text.trim().parse::<i64>()
     {
         return Some(Value::from(whole));
     }
     Number::from_f64(number).map(Value::Number)
+}
+
+pub(super) fn float(text: &str) -> Option<f64> {
+    let (sign, rest) = match text.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", text.strip_prefix('+').unwrap_or(text)),
+    };
+    let (mantissa, exponent) = rest.split_at(rest.find(['e', 'E']).unwrap_or(rest.len()));
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit());
+    let power = exponent.get(1..).unwrap_or_default();
+    let power = power.strip_prefix(['+', '-']).unwrap_or(power);
+    if (whole.is_empty() && fraction.is_empty())
+        || !digits(whole)
+        || !digits(fraction)
+        || (!exponent.is_empty() && (power.is_empty() || !digits(power)))
+    {
+        return None;
+    }
+    let whole = match whole.trim_start_matches('0') {
+        "" => "0",
+        whole => whole,
+    };
+    let point = if fraction.is_empty() { "" } else { "." };
+    serde_json::from_str(&format!("{sign}{whole}{point}{fraction}{exponent}")).ok()
 }
 
 const fn provided(value: &Value) -> &'static str {

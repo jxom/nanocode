@@ -240,22 +240,36 @@ impl ServerEvent {
 }
 
 #[doc(hidden)]
-#[derive(Deserialize)]
-#[serde(tag = "type")]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
+#[cfg_attr(not(target_family = "wasm"), serde(tag = "type"))]
 pub enum WarmupServerEvent {
-    #[serde(rename = "response.created")]
+    #[cfg_attr(not(target_family = "wasm"), serde(rename = "response.created"))]
     Created { response: WarmupResponse },
-    #[serde(rename = "response.completed")]
+    #[cfg_attr(not(target_family = "wasm"), serde(rename = "response.completed"))]
     Completed { response: WarmupResponse },
-    #[serde(rename = "response.failed")]
+    #[cfg_attr(not(target_family = "wasm"), serde(rename = "response.failed"))]
     Failed,
-    #[serde(rename = "response.incomplete")]
+    #[cfg_attr(not(target_family = "wasm"), serde(rename = "response.incomplete"))]
     Incomplete,
-    #[serde(rename = "error")]
+    #[cfg_attr(not(target_family = "wasm"), serde(rename = "error"))]
     Error,
-    #[serde(other)]
+    #[cfg_attr(not(target_family = "wasm"), serde(other))]
     Other,
 }
+
+#[cfg(target_family = "wasm")]
+tagged!(WarmupServerEvent, |fields, tag| Ok(match tag.as_str() {
+    "response.created" => Self::Created {
+        response: fields.take("response")?,
+    },
+    "response.completed" => Self::Completed {
+        response: fields.take("response")?,
+    },
+    "response.failed" => Self::Failed,
+    "response.incomplete" => Self::Incomplete,
+    "error" => Self::Error,
+    _ => Self::Other,
+}));
 
 #[doc(hidden)]
 #[derive(Deserialize)]

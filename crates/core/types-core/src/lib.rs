@@ -4,6 +4,7 @@ pub use identity::BackendId;
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf, str::FromStr};
 pub mod events;
+#[macro_use]
 mod fields;
 pub mod preview;
 pub mod pricing;
@@ -448,12 +449,44 @@ impl From<&str> for Prompt {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum PromptInput {
     Text(String),
 
     Content(Vec<UserInput>),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for PromptInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = PromptInput;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum PromptInput")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<PromptInput, E> {
+                Ok(PromptInput::Text(text.to_owned()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, text: String) -> Result<PromptInput, E> {
+                Ok(PromptInput::Text(text))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<PromptInput, A::Error> {
+                Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(PromptInput::Content)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 impl PromptInput {
