@@ -32,21 +32,40 @@ impl Fields {
         }
     }
 
-    pub(crate) fn take<T: DeserializeOwned>(&mut self, name: &'static str) -> Result<T, Error> {
-        T::deserialize(
-            self.0
-                .remove(name)
-                .ok_or_else(|| Error::missing_field(name))?,
-        )
+    #[inline(never)]
+    fn remove(&mut self, name: &str) -> Option<Value> {
+        self.0.remove(name)
     }
 
+    #[inline(never)]
+    pub(crate) fn take<T: DeserializeOwned>(&mut self, name: &'static str) -> Result<T, Error> {
+        match self.remove(name) {
+            Some(value) => T::deserialize(value),
+            None => Err(Error::missing_field(name)),
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn rest<T: DeserializeOwned>(self) -> Result<T, Error> {
+        T::deserialize(Value::Object(self.0))
+    }
+
+    #[cfg(target_family = "wasm")]
+    #[inline(never)]
+    pub(crate) fn or_default<T: DeserializeOwned + Default>(
+        &mut self,
+        name: &'static str,
+    ) -> Result<T, Error> {
+        self.remove(name)
+            .map_or_else(|| Ok(T::default()), T::deserialize)
+    }
+
+    #[inline(never)]
     pub(crate) fn optional<T: DeserializeOwned>(
         &mut self,
         name: &'static str,
     ) -> Result<Option<T>, Error> {
-        self.0
-            .remove(name)
-            .map_or(Ok(None), Option::<T>::deserialize)
+        self.remove(name).map_or(Ok(None), Option::<T>::deserialize)
     }
 }
 
@@ -63,4 +82,29 @@ fn unexpected(value: &Value) -> Unexpected<'_> {
         Value::Array(_) => Unexpected::Seq,
         Value::Object(_) => Unexpected::Map,
     }
+}
+
+#[cfg(target_family = "wasm")]
+macro_rules! tagged {
+    ($name:ident, |$fields:ident, $tag:ident| $body:expr) => {
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+                (|| -> Result<Self, serde_json::Error> {
+                    let mut $fields = $crate::fields::Fields::new(
+                        value,
+                        concat!("internally tagged enum ", stringify!($name)),
+                    )?;
+                    let $tag = $fields.tag()?;
+                    $body
+                })()
+                .map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) fn unknown(tag: &str, expected: &'static [&'static str]) -> serde_json::Error {
+    serde::de::Error::unknown_variant(tag, expected)
 }

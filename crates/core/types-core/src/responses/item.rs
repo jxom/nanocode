@@ -79,7 +79,8 @@ impl From<&str> for ResponseItemId {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseItem {
     AdditionalTools {
@@ -274,6 +275,149 @@ pub enum ResponseItem {
 
 const fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ResponseItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::from_fields(value.clone()).unwrap_or_else(|_| Self::Other(value.into())))
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl ResponseItem {
+    fn from_fields(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let mut fields = crate::fields::Fields::new(value, "internally tagged enum ResponseItem")?;
+        let tag = fields.tag()?;
+        let metadata = "internal_chat_message_metadata_passthrough";
+        Ok(match tag.as_str() {
+            "additional_tools" => Self::AdditionalTools {
+                id: fields.optional("id")?,
+                role: fields.take("role")?,
+                tools: fields.take("tools")?,
+            },
+            "message" => Self::Message {
+                id: fields.optional("id")?,
+                role: fields.take("role")?,
+                content: fields.take("content")?,
+                status: fields.optional("status")?,
+                phase: fields.optional("phase")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "agent_message" => Self::AgentMessage {
+                id: fields.optional("id")?,
+                author: fields.take("author")?,
+                recipient: fields.take("recipient")?,
+                content: fields.take("content")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "reasoning" => Self::Reasoning {
+                id: fields.optional("id")?,
+                summary: fields.or_default("summary")?,
+                content: fields.optional("content")?,
+                encrypted_content: fields.optional("encrypted_content")?,
+                status: fields.optional("status")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "local_shell_call" => Self::LocalShellCall {
+                id: fields.optional("id")?,
+                call_id: fields.optional("call_id")?,
+                status: fields.take("status")?,
+                action: fields.take("action")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "function_call" => Self::FunctionCall {
+                id: fields.optional("id")?,
+                name: fields.take("name")?,
+                namespace: fields.optional("namespace")?,
+                arguments: fields.take("arguments")?,
+                asynchronous: fields.or_default("async")?,
+                encrypted_function_args: fields.optional("encrypted_function_args")?,
+                call_id: fields.take("call_id")?,
+                caller: fields.optional("caller")?,
+                status: fields.optional("status")?,
+                created_by: fields.optional("created_by")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "function_call_output" => Self::FunctionCallOutput {
+                id: fields.optional("id")?,
+                call_id: fields.take("call_id")?,
+                output: fields.take("output")?,
+                caller: fields.optional("caller")?,
+                status: fields.optional("status")?,
+                created_by: fields.optional("created_by")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "tool_search_call" => Self::ToolSearchCall {
+                id: fields.optional("id")?,
+                call_id: fields.optional("call_id")?,
+                status: fields.optional("status")?,
+                execution: fields.take("execution")?,
+                arguments: fields.take("arguments")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "custom_tool_call" => Self::CustomToolCall {
+                id: fields.optional("id")?,
+                status: fields.optional("status")?,
+                call_id: fields.take("call_id")?,
+                name: fields.take("name")?,
+                namespace: fields.optional("namespace")?,
+                input: fields.take("input")?,
+                asynchronous: fields.or_default("async")?,
+                caller: fields.optional("caller")?,
+                created_by: fields.optional("created_by")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "custom_tool_call_output" => Self::CustomToolCallOutput {
+                id: fields.optional("id")?,
+                call_id: fields.take("call_id")?,
+                name: fields.optional("name")?,
+                output: fields.take("output")?,
+                caller: fields.optional("caller")?,
+                status: fields.optional("status")?,
+                created_by: fields.optional("created_by")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "tool_search_output" => Self::ToolSearchOutput {
+                id: fields.optional("id")?,
+                call_id: fields.optional("call_id")?,
+                status: fields.take("status")?,
+                execution: fields.take("execution")?,
+                tools: fields.take("tools")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "web_search_call" => Self::WebSearchCall {
+                id: fields.optional("id")?,
+                status: fields.optional("status")?,
+                action: fields.optional("action")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "image_generation_call" => Self::ImageGenerationCall {
+                id: fields.optional("id")?,
+                status: fields.take("status")?,
+                revised_prompt: fields.optional("revised_prompt")?,
+                result: fields.take("result")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "compaction" | "compaction_summary" => Self::Compaction {
+                id: fields.optional("id")?,
+                encrypted_content: fields.take("encrypted_content")?,
+                created_by: fields.optional("created_by")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "compaction_trigger" => Self::CompactionTrigger {},
+            "context_compaction" => Self::ContextCompaction {
+                id: fields.optional("id")?,
+                encrypted_content: fields.optional("encrypted_content")?,
+                internal_chat_message_metadata_passthrough: fields.optional(metadata)?,
+            },
+            "configuration_update" => Self::ConfigurationUpdate {
+                reasoning: fields.take("reasoning")?,
+            },
+            _ => return Err(serde::de::Error::unknown_variant(&tag, &[])),
+        })
+    }
 }
 
 impl ResponseItem {

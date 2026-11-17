@@ -40,7 +40,8 @@ pub enum HedgeWinner {
     Primary,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum HedgeOutcome {
     Capped {
@@ -57,6 +58,54 @@ pub enum HedgeOutcome {
     Unestimated,
     #[default]
     Unneeded,
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for HedgeOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        #[derive(Deserialize)]
+        struct Wire {
+            status: String,
+            deadline_ns: Option<u64>,
+            hedge_first_byte_ns: Option<u64>,
+            winner: Option<HedgeWinner>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let deadline_ns = || {
+            wire.deadline_ns
+                .ok_or_else(|| D::Error::missing_field("deadline_ns"))
+        };
+        Ok(match wire.status.as_str() {
+            "capped" => Self::Capped {
+                deadline_ns: deadline_ns()?,
+            },
+            "dispatched" => Self::Dispatched {
+                deadline_ns: deadline_ns()?,
+                hedge_first_byte_ns: wire.hedge_first_byte_ns,
+                winner: wire
+                    .winner
+                    .ok_or_else(|| D::Error::missing_field("winner"))?,
+            },
+            "throttled" => Self::Throttled {
+                deadline_ns: deadline_ns()?,
+            },
+            "unestimated" => Self::Unestimated,
+            "unneeded" => Self::Unneeded,
+            status => {
+                return Err(D::Error::unknown_variant(
+                    status,
+                    &[
+                        "capped",
+                        "dispatched",
+                        "throttled",
+                        "unestimated",
+                        "unneeded",
+                    ],
+                ));
+            }
+        })
+    }
 }
 
 impl HedgeOutcome {

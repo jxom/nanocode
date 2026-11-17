@@ -525,7 +525,7 @@ pub(crate) fn preloaded_snapshot(
     let snapshot = match hydrated.and_then(nanocode_durability::Hydrated::take::<HydratedSnapshot>)
     {
         Some(hydrated) => hydrated.snapshot,
-        None => SessionSnapshot::deserialize(checkpoint).ok()?,
+        None => serde_json::from_value(checkpoint).ok()?,
     };
     if let Some(records) = records {
         return Some((snapshot, Arc::unwrap_or_clone(records)));

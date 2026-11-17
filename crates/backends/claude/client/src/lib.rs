@@ -747,13 +747,34 @@ pub struct ToolDefinition {
     pub cache_control: Option<CacheControl>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 pub struct ServerToolDefinition {
     #[serde(rename = "type")]
     pub kind: String,
     pub name: String,
     #[serde(flatten)]
     pub options: BTreeMap<String, Value>,
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ServerToolDefinition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut options = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        let mut take = |name: &'static str| match options.remove(name) {
+            Some(Value::String(value)) => Ok(value),
+            Some(_) => Err(serde::de::Error::invalid_type(
+                serde::de::Unexpected::Other("non-string"),
+                &"a string",
+            )),
+            None => Err(serde::de::Error::missing_field(name)),
+        };
+        Ok(Self {
+            kind: take("type")?,
+            name: take("name")?,
+            options,
+        })
+    }
 }
 impl ServerToolDefinition {
     pub fn tool_search_bm25() -> Self {
@@ -810,11 +831,29 @@ impl ServerToolDefinition {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum ClaudeToolSpec {
     Client(ToolDefinition),
     Server(ServerToolDefinition),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ClaudeToolSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        if let Ok(tool) = ToolDefinition::deserialize(value.clone()) {
+            return Ok(Self::Client(tool));
+        }
+        ServerToolDefinition::deserialize(value)
+            .map(Self::Server)
+            .map_err(|_| {
+                serde::de::Error::custom(
+                    "data did not match any variant of untagged enum ClaudeToolSpec",
+                )
+            })
+    }
 }
 impl From<ToolDefinition> for ClaudeToolSpec {
     fn from(value: ToolDefinition) -> Self {

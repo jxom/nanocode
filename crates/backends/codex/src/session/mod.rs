@@ -71,11 +71,38 @@ pub(crate) struct ContextSnapshot {
     pub(crate) environment: Option<EnvironmentSnapshot>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(serde::Deserialize))]
 #[serde(tag = "kind", content = "snapshot", rename_all = "snake_case")]
 pub(crate) enum ContextBaseline {
     Missing,
     Known(ContextSnapshot),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> serde::Deserialize<'de> for ContextBaseline {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error;
+        #[derive(serde::Deserialize)]
+        struct Tagged {
+            kind: String,
+            #[serde(default)]
+            snapshot: Option<ContextSnapshot>,
+        }
+        let tagged = Tagged::deserialize(deserializer)?;
+        match (tagged.kind.as_str(), tagged.snapshot) {
+            ("missing", None) => Ok(Self::Missing),
+            ("missing", Some(_)) => Err(D::Error::invalid_type(
+                serde::de::Unexpected::Map,
+                &"unit variant ContextBaseline::Missing",
+            )),
+            ("known", Some(snapshot)) => Ok(Self::Known(snapshot)),
+            ("known", None) => Err(D::Error::missing_field("snapshot")),
+            (kind, _) => Err(D::Error::unknown_variant(kind, &["missing", "known"])),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

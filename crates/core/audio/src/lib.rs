@@ -7,7 +7,7 @@ mod wav;
 
 use nanocode_digest::Sha1;
 use std::collections::VecDeque;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use nanocode_sync::Swap;
 
@@ -15,6 +15,34 @@ const BASE64_ERROR: &str = "Base64Error";
 const AUDIO_TOKEN_ESTIMATE_CACHE_SIZE: usize = 32;
 const AUDIO_TOKENS_PER_SECOND: f64 = 10.0;
 const APPROX_BYTES_PER_TOKEN: usize = 4;
+
+static PROBE: OnceLock<&'static dyn Probe> = OnceLock::new();
+
+pub trait Probe: Send + Sync {
+    fn duration_seconds(&self, bytes: &[u8]) -> Option<f64>;
+}
+
+pub struct Builtin;
+
+impl Probe for Builtin {
+    fn duration_seconds(&self, bytes: &[u8]) -> Option<f64> {
+        container_duration_seconds(bytes)
+    }
+}
+
+pub fn install(probe: &'static dyn Probe) {
+    let _ = PROBE.set(probe);
+}
+
+#[cfg(target_family = "wasm")]
+fn installed() -> Option<&'static dyn Probe> {
+    PROBE.get().copied()
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn installed() -> Option<&'static dyn Probe> {
+    Some(PROBE.get().copied().unwrap_or(&Builtin))
+}
 
 type AudioEstimates = VecDeque<([u8; 20], usize)>;
 static AUDIO_TOKEN_ESTIMATE_CACHE: LazyLock<Swap<AudioEstimates>> = LazyLock::new(Swap::default);
@@ -86,6 +114,7 @@ fn audio_duration_seconds(audio_url: &str) -> Option<f64> {
     if !metadata_parts.any(|part| part.eq_ignore_ascii_case("base64")) {
         return None;
     }
+    let probe = installed()?;
 
     let bytes = match nanocode_sys::base64::STANDARD.decode(payload) {
         Ok(bytes) => bytes,
@@ -97,7 +126,7 @@ fn audio_duration_seconds(audio_url: &str) -> Option<f64> {
             return None;
         }
     };
-    let Some(duration_seconds) = container_duration_seconds(&bytes) else {
+    let Some(duration_seconds) = probe.duration_seconds(&bytes) else {
         nanocode_trace::trace!("failed to read audio duration for token estimation");
         return None;
     };

@@ -551,6 +551,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn f64_from_scratch(&mut self, positive: bool) -> Result<f64> {
         let text = str::from_utf8(&self.scratch).unwrap_or_default();
         let f = if self.single_precision {
@@ -561,6 +562,14 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         match f {
             Ok(f) if !f.is_infinite() => Ok(if positive { f } else { -f }),
             _ => Err(self.error(ErrorCode::NumberOutOfRange)),
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn f64_from_scratch(&mut self, positive: bool) -> Result<f64> {
+        match crate::decimal::parse(&self.scratch, self.single_precision) {
+            Some(f) => Ok(if positive { f } else { -f }),
+            None => Err(self.error(ErrorCode::NumberOutOfRange)),
         }
     }
 

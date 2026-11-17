@@ -428,7 +428,7 @@ fn leading_sleep(command: &str) -> Option<String> {
     {
         return None;
     }
-    let seconds: f64 = seconds.parse().ok()?;
+    let seconds = super::input::float(seconds)?;
     if seconds < BLOCKED_SLEEP_SECONDS {
         return None;
     }

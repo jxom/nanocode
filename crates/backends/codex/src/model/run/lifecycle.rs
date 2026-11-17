@@ -56,7 +56,8 @@ impl Drop for CompactionLifecycle<'_> {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 enum RecordedCompactionOutcome {
     Success(RecordedCompactionResult),
@@ -67,6 +68,38 @@ enum RecordedCompactionOutcome {
         #[serde(default)]
         recovery: crate::error::CompactionRecovery,
     },
+}
+
+#[cfg(target_family = "wasm")]
+#[derive(Deserialize)]
+struct RecordedCompactionFailure {
+    compaction_error: String,
+    #[serde(default)]
+    requires_session_stop: bool,
+    #[serde(default)]
+    recovery: crate::error::CompactionRecovery,
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for RecordedCompactionOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Ok(result) = RecordedCompactionResult::deserialize(value.clone()) {
+            return Ok(Self::Success(result));
+        }
+        match RecordedCompactionFailure::deserialize(value) {
+            Ok(failure) => Ok(Self::Failure {
+                compaction_error: failure.compaction_error,
+                requires_session_stop: failure.requires_session_stop,
+                recovery: failure.recovery,
+            }),
+            Err(_) => Err(serde::de::Error::custom(
+                "data did not match any variant of untagged enum RecordedCompactionOutcome",
+            )),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]

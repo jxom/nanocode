@@ -43,12 +43,15 @@ pub fn retry_after(headers: &HeaderMap) -> Option<Duration> {
 
 #[must_use]
 pub fn retry_after_ms(headers: &HeaderMap) -> Option<Duration> {
-    let milliseconds: f64 = headers
-        .get(RETRY_AFTER_MS)?
-        .to_str()
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
-    Duration::try_from_secs_f64(milliseconds / 1000.0).ok()
+    let text = headers.get(RETRY_AFTER_MS)?.to_str().ok()?.trim();
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let nanos = fraction
+        .bytes()
+        .chain(std::iter::repeat(b'0'))
+        .take(6)
+        .fold(0, |nanos, digit| nanos * 10 + u64::from(digit - b'0'));
+    Duration::from_millis(whole.parse().ok()?).checked_add(Duration::from_nanos(nanos))
 }

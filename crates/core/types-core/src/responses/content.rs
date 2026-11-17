@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ImageDetail;
+#[cfg(target_family = "wasm")]
+use crate::fields::unknown;
+use crate::{ImageDetail, fields::Fields};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -123,7 +125,8 @@ pub enum LocalShellStatus {
     Incomplete,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LocalShellAction {
     Exec(LocalShellExecAction),
@@ -142,7 +145,8 @@ pub struct LocalShellExecAction {
     pub user: Option<Box<str>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WebSearchAction {
     Search {
@@ -164,11 +168,12 @@ pub enum WebSearchAction {
         pattern: Option<Box<str>>,
     },
 
-    #[serde(other)]
+    #[cfg_attr(not(target_family = "wasm"), serde(other))]
     Other,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputTextAnnotation {
     FileCitation {
@@ -215,7 +220,8 @@ pub struct OutputTextTopLogprob {
     pub logprob: f64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolCaller {
     Direct,
@@ -223,7 +229,8 @@ pub enum ToolCaller {
     Program { caller_id: Box<str> },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMessageContent {
     InputText { text: Box<str> },
@@ -231,13 +238,15 @@ pub enum AgentMessageContent {
     EncryptedContent { encrypted_content: Box<str> },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReasoningSummary {
     SummaryText { text: Box<str> },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReasoningContent {
     ReasoningText { text: Box<str> },
@@ -245,12 +254,40 @@ pub enum ReasoningContent {
     Text { text: Box<str> },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum FunctionOutputBody {
     Text(Box<str>),
 
     Content(Vec<FunctionOutputContent>),
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for FunctionOutputBody {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = FunctionOutputBody;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("untagged enum FunctionOutputBody")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<FunctionOutputBody, E> {
+                Ok(FunctionOutputBody::Text(text.into()))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<FunctionOutputBody, A::Error> {
+                Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(FunctionOutputBody::Content)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -280,32 +317,6 @@ pub enum FunctionOutputContent {
 
     EncryptedContent {
         encrypted_content: Box<str>,
-    },
-}
-
-#[derive(Deserialize)]
-#[serde(remote = "ContentItem", tag = "type", rename_all = "snake_case")]
-enum ContentItemFields {
-    InputText {
-        text: Box<str>,
-    },
-
-    InputImage {
-        image_url: Box<str>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<ImageDetail>,
-    },
-
-    InputAudio {
-        audio_url: Box<str>,
-    },
-
-    OutputText {
-        text: Box<str>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        annotations: Option<Vec<OutputTextAnnotation>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        logprobs: Option<Vec<OutputTextLogprob>>,
     },
 }
 
@@ -340,34 +351,34 @@ impl<'de> Deserialize<'de> for ContentItem {
                 },
             });
         }
-        ContentItemFields::deserialize(value).map_err(serde::de::Error::custom)
+        Self::from_fields(value).map_err(serde::de::Error::custom)
     }
 }
 
-#[derive(Deserialize)]
-#[serde(
-    remote = "FunctionOutputContent",
-    tag = "type",
-    rename_all = "snake_case"
-)]
-enum FunctionOutputContentFields {
-    InputText {
-        text: Box<str>,
-    },
-
-    InputImage {
-        image_url: Box<str>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<ImageDetail>,
-    },
-
-    InputAudio {
-        audio_url: Box<str>,
-    },
-
-    EncryptedContent {
-        encrypted_content: Box<str>,
-    },
+impl ContentItem {
+    fn from_fields(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let mut fields = Fields::new(value, "internally tagged enum ContentItem")?;
+        let tag = fields.tag()?;
+        Ok(match tag.as_str() {
+            "input_text" => Self::InputText {
+                text: fields.take("text")?,
+            },
+            "input_audio" => Self::InputAudio {
+                audio_url: fields.take("audio_url")?,
+            },
+            "output_text" => Self::OutputText {
+                text: fields.take("text")?,
+                annotations: fields.optional("annotations")?,
+                logprobs: fields.optional("logprobs")?,
+            },
+            _ => {
+                return Err(serde::de::Error::unknown_variant(
+                    &tag,
+                    &["input_text", "input_image", "input_audio", "output_text"],
+                ));
+            }
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for FunctionOutputContent {
@@ -386,6 +397,133 @@ impl<'de> Deserialize<'de> for FunctionOutputContent {
                 },
             });
         }
-        FunctionOutputContentFields::deserialize(value).map_err(serde::de::Error::custom)
+        Self::from_fields(value).map_err(serde::de::Error::custom)
     }
 }
+
+impl FunctionOutputContent {
+    fn from_fields(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let mut fields = Fields::new(value, "internally tagged enum FunctionOutputContent")?;
+        let tag = fields.tag()?;
+        Ok(match tag.as_str() {
+            "input_text" => Self::InputText {
+                text: fields.take("text")?,
+            },
+            "input_audio" => Self::InputAudio {
+                audio_url: fields.take("audio_url")?,
+            },
+            "encrypted_content" => Self::EncryptedContent {
+                encrypted_content: fields.take("encrypted_content")?,
+            },
+            _ => {
+                return Err(serde::de::Error::unknown_variant(
+                    &tag,
+                    &[
+                        "input_text",
+                        "input_image",
+                        "input_audio",
+                        "encrypted_content",
+                    ],
+                ));
+            }
+        })
+    }
+}
+
+#[cfg(target_family = "wasm")]
+tagged!(LocalShellAction, |fields, tag| match tag.as_str() {
+    "exec" => Ok(Self::Exec(fields.rest()?)),
+    _ => Err(unknown(&tag, &["exec"])),
+});
+
+#[cfg(target_family = "wasm")]
+tagged!(WebSearchAction, |fields, tag| Ok(match tag.as_str() {
+    "search" => Self::Search {
+        query: fields.optional("query")?,
+        queries: fields.optional("queries")?,
+    },
+    "open_page" => Self::OpenPage {
+        url: fields.optional("url")?,
+    },
+    "find_in_page" => Self::FindInPage {
+        url: fields.optional("url")?,
+        pattern: fields.optional("pattern")?,
+    },
+    _ => Self::Other,
+}));
+
+#[cfg(target_family = "wasm")]
+tagged!(OutputTextAnnotation, |fields, tag| Ok(match tag.as_str() {
+    "file_citation" => Self::FileCitation {
+        file_id: fields.take("file_id")?,
+        filename: fields.take("filename")?,
+        index: fields.take("index")?,
+    },
+    "url_citation" => Self::UrlCitation {
+        end_index: fields.take("end_index")?,
+        start_index: fields.take("start_index")?,
+        title: fields.take("title")?,
+        url: fields.take("url")?,
+    },
+    "container_file_citation" => Self::ContainerFileCitation {
+        container_id: fields.take("container_id")?,
+        end_index: fields.take("end_index")?,
+        file_id: fields.take("file_id")?,
+        filename: fields.take("filename")?,
+        start_index: fields.take("start_index")?,
+    },
+    "file_path" => Self::FilePath {
+        file_id: fields.take("file_id")?,
+        index: fields.take("index")?,
+    },
+    _ => {
+        return Err(unknown(
+            &tag,
+            &[
+                "file_citation",
+                "url_citation",
+                "container_file_citation",
+                "file_path",
+            ],
+        ));
+    }
+}));
+
+#[cfg(target_family = "wasm")]
+tagged!(ToolCaller, |fields, tag| Ok(match tag.as_str() {
+    "direct" => Self::Direct,
+    "program" => Self::Program {
+        caller_id: fields.take("caller_id")?,
+    },
+    _ => return Err(unknown(&tag, &["direct", "program"])),
+}));
+
+#[cfg(target_family = "wasm")]
+tagged!(AgentMessageContent, |fields, tag| Ok(match tag.as_str() {
+    "input_text" => Self::InputText {
+        text: fields.take("text")?,
+    },
+    "encrypted_content" => Self::EncryptedContent {
+        encrypted_content: fields.take("encrypted_content")?,
+    },
+    _ => return Err(unknown(&tag, &["input_text", "encrypted_content"])),
+}));
+
+#[cfg(target_family = "wasm")]
+tagged!(ReasoningSummary, |fields, tag| match tag.as_str() {
+    "summary_text" => Ok(Self::SummaryText {
+        text: fields.take("text")?,
+    }),
+    _ => Err(unknown(&tag, &["summary_text"])),
+});
+
+#[cfg(target_family = "wasm")]
+tagged!(ReasoningContent, |fields, tag| Ok(match tag.as_str() {
+    "reasoning_text" => Self::ReasoningText {
+        text: fields.take("text")?,
+    },
+    "text" => Self::Text {
+        text: fields.take("text")?,
+    },
+    _ => return Err(unknown(&tag, &["reasoning_text", "text"])),
+}));

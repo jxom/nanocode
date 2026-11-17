@@ -13,7 +13,8 @@ struct AuthoredOverride {
     effort: Thinking,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(Deserialize))]
 #[serde(tag = "state", rename_all = "snake_case")]
 enum ReasoningPin {
     #[default]
@@ -23,6 +24,38 @@ enum ReasoningPin {
         model: String,
         effort: Thinking,
     },
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ReasoningPin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        #[derive(Deserialize)]
+        struct Tagged {
+            state: String,
+            #[serde(default)]
+            model: Option<String>,
+            #[serde(default)]
+            effort: Option<Thinking>,
+        }
+        let tagged = Tagged::deserialize(deserializer)?;
+        match tagged.state.as_str() {
+            "unset" => Ok(Self::Unset),
+            "compacted" => Ok(Self::Compacted),
+            "active" => Ok(Self::Active {
+                model: tagged
+                    .model
+                    .ok_or_else(|| D::Error::missing_field("model"))?,
+                effort: tagged
+                    .effort
+                    .ok_or_else(|| D::Error::missing_field("effort"))?,
+            }),
+            state => Err(D::Error::unknown_variant(
+                state,
+                &["unset", "compacted", "active"],
+            )),
+        }
+    }
 }
 
 impl ReasoningState {

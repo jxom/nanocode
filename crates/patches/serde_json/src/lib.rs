@@ -116,6 +116,9 @@ pub mod map;
 pub mod ser;
 pub mod value;
 
+#[cfg(target_family = "wasm")]
+mod decimal;
+
 #[cfg(not(target_family = "wasm"))]
 mod float;
 #[cfg(target_family = "wasm")]

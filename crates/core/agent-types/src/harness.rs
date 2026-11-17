@@ -666,6 +666,7 @@ impl Serialize for ModelSelection {
         }
     }
 }
+#[cfg(not(target_family = "wasm"))]
 impl<'de> Deserialize<'de> for ModelSelection {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -676,12 +677,31 @@ impl<'de> Deserialize<'de> for ModelSelection {
         }
         match Wire::deserialize(deserializer)? {
             Wire::Known(value) => value.parse().map_err(de::Error::custom),
-            Wire::Open(value) => {
-                let model = Self::new(value.backend, value.model);
-                model.validate().map_err(de::Error::custom)?;
-                Ok(model)
+            Wire::Open(value) => value.selection(),
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl<'de> Deserialize<'de> for ModelSelection {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Wire;
+        impl<'de> de::Visitor<'de> for Wire {
+            type Value = ModelSelection;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("untagged enum Wire")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<ModelSelection, E> {
+                value.parse().map_err(E::custom)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<ModelSelection, A::Error> {
+                QualifiedModel::deserialize(de::value::MapAccessDeserializer::new(map))?.selection()
             }
         }
+        deserializer.deserialize_any(Wire)
     }
 }
 
@@ -689,4 +709,12 @@ impl<'de> Deserialize<'de> for ModelSelection {
 struct QualifiedModel {
     backend: BackendId,
     model: String,
+}
+
+impl QualifiedModel {
+    fn selection<E: de::Error>(self) -> Result<ModelSelection, E> {
+        let model = ModelSelection::new(self.backend, self.model);
+        model.validate().map_err(E::custom)?;
+        Ok(model)
+    }
 }

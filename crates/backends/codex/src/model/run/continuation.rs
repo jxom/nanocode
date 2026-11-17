@@ -22,7 +22,7 @@ struct CurrentExecution {
     prompt_cache_key: String,
     model: String,
     effort: Thinking,
-    #[serde(flatten, with = "crate::service_tier_serde")]
+    #[serde(alias = "fast_mode", with = "crate::service_tier_serde")]
     service_tier: ServiceTier,
     reasoning_mode: String,
     model_id_prefix: Option<String>,

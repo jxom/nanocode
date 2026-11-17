@@ -3,7 +3,7 @@ use crate::{HarnessFamily, ModelSelection};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CodexPayload {
-    #[serde(flatten, with = "crate::service_tier_serde")]
+    #[serde(alias = "fast_mode", with = "crate::service_tier_serde")]
     service_tier: ServiceTier,
 
     #[serde(default)]
