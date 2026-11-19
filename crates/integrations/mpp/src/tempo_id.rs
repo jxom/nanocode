@@ -15,7 +15,7 @@ use super::session::channel::{OPEN_SIGNATURE, TIP20_CHANNEL_RESERVE_ADDRESS, TOP
 use super::tx::{self, PATH_USD, USDC};
 
 pub const TEMPO_ID_URL: &str = "https://id.tempo.xyz";
-pub const CLIENT_ID: &str = "cli:nanocode";
+pub const CLIENT_ID: &str = "nanocode";
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const SCOPE: &str = "openid";
 const KEY_TYPE: &str = "secp256k1";
